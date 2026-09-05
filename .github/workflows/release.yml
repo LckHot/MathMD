@@ -1,5 +1,7 @@
 name: Release
 
+# Builds run ONLY when a version tag is pushed — documentation-only
+# commits to main never trigger a compile.
 on:
   push:
     tags: [ 'v*' ]
@@ -42,36 +44,20 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --console=plain
 
-      - name: Build release APK (self-signed, reproducible keystore)
+      - name: Build signed release APK
+        # Fails with a clear message if signing secrets are not configured;
+        # configure them once per repository (see docs/signing-setup.md).
         run: ./gradlew :app:assembleRelease --console=plain
         env:
           MATHMD_RELEASE_STORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
           MATHMD_RELEASE_STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
           MATHMD_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
 
-      - name: Release APK fallback when no secrets configured
-        run: |
-          if ! ls app/build/outputs/apk/release/*release*.apk >/dev/null 2>&1; then
-            echo "RELEASE_SECRETS_MISSING=true" >> "$GITHUB_ENV"
-          fi
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
         with:
           name: MathMD ${{ steps.version.outputs.name }}
-          body: |
-            MathMD ${{ steps.version.outputs.name }}
-
-            Minimal Android markdown reader for mathematicians with correct
-            rendering of all four TeX/LaTeX math delimiter styles
-            (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`).
-
-            - **app-release.apk** — signed release build (recommended)
-            - **app-debug.apk** — debug build
-            - `$...$` vs `$5$`: see README "Known trade-off: dollar signs"
-
-            Install: download an APK and open it on the device (allow
-            "install unknown apps" for this app).
+          body_path: release-notes.md
           files: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release.apk

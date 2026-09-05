@@ -68,8 +68,8 @@ gradle :app:assembleDebug     # APK: app/build/outputs/apk/debug/
 - `app/` — Android app (Kotlin, Jetpack Compose, Material 3)
 - `tools/preview-src/` — math-protection scanner + render pipeline (TypeScript)
 - `tools/mdtest/` — node regression harness for the preview pipeline
-- `docs/` — architecture decision record and research notes
-- `scripts/build-preview.sh` — esbuild bundle step
+- `docs/` — architecture decision record, research notes, signing setup
+- `scripts/` — esbuild bundle step, keystore generator
 
 ## Credits
 
