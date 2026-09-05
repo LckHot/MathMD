@@ -23,9 +23,9 @@ any math renderer sees them.
 
 MathMD extracts math segments **before** markdown parsing (a
 protection/placeholder pass), so all four delimiter styles survive intact.
-The pass is written in TypeScript and covered by a 24-case regression suite
-(including `$\{x\}$`, inline pairs, `$W^{1,p}_0(\Omega)$`, currency like
-`$100 and $200`, and code spans/fences that must stay literal).
+The pass is written in TypeScript and covered by a 27-case regression suite
+(including `$\{x\}$`, inline pairs, `$W^{1,p}_0(\Omega)$`, and code
+spans/fences that must stay literal).
 
 ## Features
 
@@ -38,12 +38,16 @@ The pass is written in TypeScript and covered by a 24-case regression suite
 
 ## Known trade-off: dollar signs
 
-There is deliberately no currency special-casing. `$` follows standard
-Pandoc inline-math rules: an opening `$` pairs with the next unescaped `$`
-(no whitespace right after the opener / before the closer). Spaced amounts
-like `$100 and $200` stay prose automatically; tight pairs like `$5$` are
-math — if your document mixes both, escape the literal dollars (`\$`) or
-use code spans.
+There is deliberately no currency special-casing. **Every unescaped `$`
+interacts with the math pass.** In ordinary (especially CJK) text a `$`
+almost always sits next to a non-whitespace character, so two `$` signs in
+the same sentence will pair and treat everything between them as a formula
+— e.g. `我有$3，你有$5。` renders the text `3，你有` as math. Even a
+single unpaired `$` can leave the pass in a failed math state and produce
+a render error.
+
+**All dedicated dollar signs must therefore be written escaped (`\$`) or
+inside code spans** — a literal `$` is never safe.
 
 ## Build
 

@@ -112,9 +112,21 @@ const DISP = 'katex-display';
   check('unmatched $ is literal', r.mathCount === 0 && r.html.includes('$5'), r.html);
 }
 {
-  // The accepted v1.0 trade-off: no-space dollar pairs ARE math, even for currency.
+  // The accepted v1.0 trade-off: no-space $..$ pairs ARE math, wherever they occur.
   const r = renderMarkdown('price is $5$ today');
   check('no-space $..$ pairs as math (documented trade-off)', r.mathCount === 1, `count=${r.mathCount}`);
+}
+{
+  // Owner-verified hazard (CJK): $ glued to CJK chars pairs across arbitrary
+  // text — "3，你有" becomes a formula. This is why escaping is mandatory.
+  const r = renderMarkdown('我有$3，你有$5。');
+  check('CJK-adjacent $ pairs across arbitrary text (mandates escaping)', r.mathCount === 1, `count=${r.mathCount} html=${r.html.slice(0, 140)}`);
+}
+{
+  // Guardrail evidence: spaced prose after/before a $ keeps it literal,
+  // so ordinary sentences with dollar amounts don't silently become math.
+  const r = renderMarkdown('I paid $5 for X and got $3 back');
+  check('spaced prose after $ keeps it literal (guardrail)', r.mathCount === 0 && r.html.includes('$5') && r.html.includes('$3'), `count=${r.mathCount}`);
 }
 
 // 4. Code constructs shield math
