@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.lckhot.mathmd"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.0.0"
+        versionCode = 16
+        versionName = "1.0.1"
     }
 
     buildTypes {

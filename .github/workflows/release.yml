@@ -37,16 +37,12 @@ jobs:
       - name: Build preview bundle
         run: ./scripts/build-preview.sh
 
-      - name: Extract versionName
-        id: version
-        run: echo "name=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
-
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --console=plain
 
       - name: Build signed release APK
-        # Fails with a clear message if signing secrets are not configured;
-        # configure them once per repository (see docs/signing-setup.md).
+        # Fails with a clear error if signing secrets are not configured
+        # (see docs/signing-setup.md).
         run: ./gradlew :app:assembleRelease --console=plain
         env:
           MATHMD_RELEASE_STORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
@@ -55,8 +51,10 @@ jobs:
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v3
+        # Tag name is the single source of truth for the release title;
+        # versionName in build.gradle.kts only governs the in-app version.
         with:
-          name: MathMD ${{ steps.version.outputs.name }}
+          name: MathMD ${{ github.ref_name }}
           body_path: release-notes.md
           files: |
             app/build/outputs/apk/debug/app-debug.apk
