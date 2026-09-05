@@ -39,13 +39,7 @@ spans/fences that must stay literal).
 ## Known trade-off: dollar signs
 
 There is deliberately no currency special-casing. **Every unescaped `$`
-interacts with the math pass.** In ordinary (especially CJK) text a `$`
-almost always sits next to a non-whitespace character, so two `$` signs in
-the same sentence will pair and treat everything between them as a formula
-— e.g. `我有$3，你有$5。` renders the text `3，你有` as math. Even a
-single unpaired `$` can leave the pass in a failed math state and produce
-a render error.
-
+interacts with the math pass.** 
 **All dedicated dollar signs must therefore be written escaped (`\$`) or
 inside code spans** — a literal `$` is never safe.
 
