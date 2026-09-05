@@ -23,7 +23,6 @@ private class PreviewState {
 internal fun PreviewPane(
     source: String,
     appDark: Boolean,
-    fontSize: Int,
     fontName: String,
     visible: Boolean,
     modifier: Modifier = Modifier,
@@ -64,7 +63,7 @@ internal fun PreviewPane(
         },
         update = { view ->
             val st = view.tag as PreviewState
-            val options = previewOptionsJson(appDark, fontSize, fontName)
+            val options = previewOptionsJson(appDark, fontName)
             st.latestMarkdown = source
             st.latestOptions = options
             if (st.ready && visible) pushDocument(view, source, options)
@@ -83,10 +82,9 @@ private fun cssFontFamily(name: String): String? = when (name) {
 }
 
 /** JSON options object passed to MathMD.hostUpdate. */
-private fun previewOptionsJson(appDark: Boolean, fontSize: Int, fontName: String): String {
+private fun previewOptionsJson(appDark: Boolean, fontName: String): String {
     val o = JSONObject()
         .put("theme", if (appDark) "dark" else "light")
-        .put("fontSizePx", fontSize)
     cssFontFamily(fontName)?.let { o.put("fontFamily", it) }
     return o.toString()
 }

@@ -42,12 +42,10 @@ internal fun SettingsDialog(
     themeMode: String,
     editorFontSize: Int,
     editorFont: String,
-    previewFontSize: Int,
     previewFont: String,
     onTheme: (String) -> Unit,
     onEditorSize: (Int) -> Unit,
     onEditorFont: (String) -> Unit,
-    onPreviewSize: (Int) -> Unit,
     onPreviewFont: (String) -> Unit,
     onStartupMode: (String) -> Unit,
     startupMode: String,
@@ -89,9 +87,6 @@ internal fun SettingsDialog(
                         options = FONT_FAMILIES,
                         onPick = onEditorFont,
                     )
-                }
-                SettingRow("Preview font size (8–40)") {
-                    SizeField(previewFontSize, onPreviewSize)
                 }
                 SettingRow("Preview font") {
                     PickerField(

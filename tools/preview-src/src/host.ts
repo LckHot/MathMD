@@ -11,8 +11,6 @@ import { renderMarkdown } from './render';
 export interface HostOptions {
   /** 'system' resolves via prefers-color-scheme at apply time. */
   theme?: 'system' | 'light' | 'dark';
-  /** Preview base font size in CSS px. */
-  fontSizePx?: number;
   /** CSS font-family for preview text ('' = bundle default stack). */
   fontFamily?: string;
 }
@@ -31,9 +29,6 @@ function applyHostOptions(o: HostOptions): void {
       : o.theme === 'light' ? 'light'
         : window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   root.dataset.theme = theme;
-  if (typeof o.fontSizePx === 'number' && o.fontSizePx > 0) {
-    root.style.setProperty('--preview-font-size', `${o.fontSizePx}px`);
-  }
   if (typeof o.fontFamily === 'string' && o.fontFamily.length > 0) {
     root.style.setProperty('--preview-font-family', o.fontFamily);
   }

@@ -200,7 +200,7 @@ const DISP = 'katex-display';
 }
 {
   previewEl.innerHTML = '';
-  ctx.MathMD.hostUpdate('hi $x$', { theme: 'dark', fontSizePx: 19 });
+  ctx.MathMD.hostUpdate('hi $x$', { theme: 'dark' });
   check('hostUpdate applies theme+font opts', doc.documentElement.dataset.theme === 'dark', JSON.stringify(doc.documentElement.dataset));
 }
 

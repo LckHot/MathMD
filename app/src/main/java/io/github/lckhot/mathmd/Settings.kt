@@ -2,7 +2,7 @@ package io.github.lckhot.mathmd
 
 import android.content.Context
 
-/** Persisted user settings (theme, per-pane font size/family, startup mode). */
+/** Persisted user settings (theme, editor font size/family, preview font family, startup mode). */
 internal class Settings(context: Context) {
     private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -17,10 +17,6 @@ internal class Settings(context: Context) {
     var editorFont: String
         get() = prefs.getString("editorFont", "default") ?: "default"
         set(v) = prefs.edit().putString("editorFont", v).apply()
-
-    var previewFontSize: Int
-        get() = prefs.getInt("previewFontSize", 16)
-        set(v) = prefs.edit().putInt("previewFontSize", v).apply()
 
     var previewFont: String
         get() = prefs.getString("previewFont", "default") ?: "default"

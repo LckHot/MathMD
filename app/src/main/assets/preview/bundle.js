@@ -260,9 +260,6 @@
     const root = document.documentElement;
     const theme = o.theme === "dark" ? "dark" : o.theme === "light" ? "light" : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     root.dataset.theme = theme;
-    if (typeof o.fontSizePx === "number" && o.fontSizePx > 0) {
-      root.style.setProperty("--preview-font-size", `${o.fontSizePx}px`);
-    }
     if (typeof o.fontFamily === "string" && o.fontFamily.length > 0) {
       root.style.setProperty("--preview-font-family", o.fontFamily);
     }
