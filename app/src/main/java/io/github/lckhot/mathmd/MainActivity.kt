@@ -95,7 +95,6 @@ private fun MathMdApp(externalUri: Uri?) {
     var themeMode by remember { mutableStateOf(settings.theme) }
     var editorFontSize by remember { mutableStateOf(settings.editorFontSize) }
     var editorFont by remember { mutableStateOf(settings.editorFont) }
-    var previewFontSize by remember { mutableStateOf(settings.previewFontSize) }
     var previewFont by remember { mutableStateOf(settings.previewFont) }
     var startupMode by remember { mutableStateOf(settings.startupMode) }
 
@@ -175,6 +174,9 @@ private fun MathMdApp(externalUri: Uri?) {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> if (uri != null) loadFromUri(uri) }
 
+    // CreateDocument serves both first-time Save on an untitled buffer and
+    // Save as…: in both cases the picked location becomes the document this
+    // app saves to from now on.
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
@@ -242,6 +244,13 @@ private fun MathMdApp(externalUri: Uri?) {
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text("Save as…") },
+                                onClick = {
+                                    menuOpen = false
+                                    createLauncher.launch(doc.name)
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Settings") },
                                 onClick = {
                                     menuOpen = false
@@ -258,7 +267,7 @@ private fun MathMdApp(externalUri: Uri?) {
                 // reload flash); Edit mode covers it with an opaque surface.
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     PreviewPane(
-                        text, appDark, previewFontSize, previewFont,
+                        text, appDark, previewFont,
                         visible = mode == Mode.Preview,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -282,12 +291,10 @@ private fun MathMdApp(externalUri: Uri?) {
                 themeMode = themeMode,
                 editorFontSize = editorFontSize,
                 editorFont = editorFont,
-                previewFontSize = previewFontSize,
                 previewFont = previewFont,
                 onTheme = { themeMode = it; settings.theme = it },
                 onEditorSize = { editorFontSize = it; settings.editorFontSize = it },
                 onEditorFont = { editorFont = it; settings.editorFont = it },
-                onPreviewSize = { previewFontSize = it; settings.previewFontSize = it },
                 onPreviewFont = { previewFont = it; settings.previewFont = it },
                 startupMode = startupMode,
                 onStartupMode = { startupMode = it; settings.startupMode = it },
