@@ -1,0 +1,15 @@
+# Build outputs
+build/
+app/build/
+.gradle/
+local.properties
+*.apk
+*.aab
+*.keystore
+!debug.keystore
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+docs/MEMORY.md

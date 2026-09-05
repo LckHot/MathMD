@@ -1,0 +1,325 @@
+@file:OptIn(ExperimentalMaterial3Api::class)
+
+package io.github.lckhot.mathmd
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.provider.OpenableColumns
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalMinimumInteractiveComponentEnforcement
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import java.io.IOException
+
+class MainActivity : ComponentActivity() {
+    /** Documents arriving via ACTION_VIEW (file manager, chat apps). */
+    private val viewUri = mutableStateOf<Uri?>(null)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        viewUri.value = extractViewUri(intent)
+        setContent { MathMdApp(externalUri = viewUri.value) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        viewUri.value = extractViewUri(intent)
+    }
+
+    private fun extractViewUri(intent: Intent?): Uri? =
+        if (intent?.action == Intent.ACTION_VIEW) intent.data else null
+}
+
+/** Editing modes: source editor and rendered preview. */
+private enum class Mode { Edit, Preview }
+
+/** Current backing document. */
+private class DocState {
+    var uri: Uri? = null
+    var name: String = "untitled.md"
+    var savedText: String = ""
+}
+
+private fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode) {
+    "light" -> false
+    "dark" -> true
+    else -> systemDark
+}
+
+@Composable
+private fun MathMdApp(externalUri: Uri?) {
+    val context = LocalContext.current
+    val settings = remember { Settings(context) }
+
+    var themeMode by remember { mutableStateOf(settings.theme) }
+    var editorFontSize by remember { mutableStateOf(settings.editorFontSize) }
+    var editorFont by remember { mutableStateOf(settings.editorFont) }
+    var previewFontSize by remember { mutableStateOf(settings.previewFontSize) }
+    var previewFont by remember { mutableStateOf(settings.previewFont) }
+    var startupMode by remember { mutableStateOf(settings.startupMode) }
+
+    // Mode has no ordering: back always exits the app, never switches mode.
+    var mode by remember {
+        mutableStateOf(if (settings.startupMode == "preview") Mode.Preview else Mode.Edit)
+    }
+    var text by rememberSaveable { mutableStateOf("") }
+    var showSettings by rememberSaveable { mutableStateOf(false) }
+    var menuOpen by rememberSaveable { mutableStateOf(false) }
+
+    val doc = remember { DocState() }
+    val dirty = text != doc.savedText
+
+    val resolver = context.contentResolver
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    fun onUi(block: () -> Unit) {
+        mainHandler.post(block)
+    }
+
+    fun toast(message: String) {
+        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+    }
+
+    fun displayName(uri: Uri): String =
+        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+        } ?: "untitled.md"
+
+    fun loadFromUri(uri: Uri) {
+        Thread {
+            try {
+                val content = resolver.openInputStream(uri)?.use {
+                    it.readBytes().toString(Charsets.UTF_8)
+                } ?: throw IOException("no data")
+                val name = displayName(uri)
+                try {
+                    resolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                } catch (_: SecurityException) {
+                    // ACTION_VIEW grants are often session-scoped; save falls back to Save As.
+                }
+                onUi {
+                    doc.uri = uri
+                    doc.name = name
+                    doc.savedText = content
+                    text = content
+                    // NOTE: mode is NOT touched here — it is governed solely by
+                    // the startup-mode preference (set at composition and for
+                    // external opens). Forcing Edit here overrides the pref.
+                }
+            } catch (e: Exception) {
+                onUi { toast("Open failed: ${e.message}") }
+            }
+        }.start()
+    }
+
+    fun writeTo(uri: Uri, content: String, onOk: () -> Unit) {
+        Thread {
+            try {
+                resolver.openOutputStream(uri, "wt")?.use {
+                    it.write(content.toByteArray(Charsets.UTF_8))
+                } ?: throw IOException("no output stream")
+                onUi { onOk() }
+            } catch (e: SecurityException) {
+                onUi { toast("No write permission for this file") }
+            } catch (e: Exception) {
+                onUi { toast("Save failed: ${e.message}") }
+            }
+        }.start()
+    }
+
+    val openLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> if (uri != null) loadFromUri(uri) }
+
+    val createLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("text/markdown"),
+    ) { uri ->
+        if (uri != null) {
+            doc.uri = uri
+            doc.name = displayName(uri)
+            writeTo(uri, text) { doc.savedText = text }
+        }
+    }
+
+    fun save() {
+        val uri = doc.uri
+        if (uri == null) {
+            createLauncher.launch(doc.name)
+        } else {
+            writeTo(uri, text) {
+                doc.savedText = text
+                toast("Saved")
+            }
+        }
+    }
+
+    // Documents opened from outside the app: honor the startup-mode preference.
+    LaunchedEffect(externalUri) {
+        if (externalUri != null) {
+            mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
+            loadFromUri(externalUri)
+        }
+    }
+
+    val systemDark = isSystemInDarkTheme()
+    val appDark = isDarkTheme(themeMode, systemDark)
+
+    MaterialTheme(colorScheme = if (appDark) darkColorScheme() else lightColorScheme()) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    expandedHeight = 48.dp,
+                    title = {
+                        Text(
+                            if (dirty) "${doc.name} •" else doc.name,
+                            fontSize = 14.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                    actions = {
+                        ModeToggle(mode) { mode = it }
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Filled.Menu, contentDescription = "Menu")
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Open") },
+                                onClick = {
+                                    menuOpen = false
+                                    openLauncher.launch(arrayOf("text/markdown", "text/x-markdown", "text/plain", "application/octet-stream"))
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Save") },
+                                onClick = {
+                                    menuOpen = false
+                                    save()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Settings") },
+                                onClick = {
+                                    menuOpen = false
+                                    showSettings = true
+                                },
+                            )
+                        }
+                    },
+                )
+            },
+        ) { padding ->
+            Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+                // WebView stays alive across mode switches (no recreate + page
+                // reload flash); Edit mode covers it with an opaque surface.
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    PreviewPane(
+                        text, appDark, previewFontSize, previewFont,
+                        visible = mode == Mode.Preview,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                    if (mode == Mode.Edit) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.background,
+                            modifier = Modifier.fillMaxSize(),
+                        ) {
+                            EditorPane(
+                                text, editorFontSize, editorFont,
+                                Modifier.fillMaxSize(),
+                            ) { text = it }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showSettings) {
+            SettingsDialog(
+                themeMode = themeMode,
+                editorFontSize = editorFontSize,
+                editorFont = editorFont,
+                previewFontSize = previewFontSize,
+                previewFont = previewFont,
+                onTheme = { themeMode = it; settings.theme = it },
+                onEditorSize = { editorFontSize = it; settings.editorFontSize = it },
+                onEditorFont = { editorFont = it; settings.editorFont = it },
+                onPreviewSize = { previewFontSize = it; settings.previewFontSize = it },
+                onPreviewFont = { previewFont = it; settings.previewFont = it },
+                startupMode = startupMode,
+                onStartupMode = { startupMode = it; settings.startupMode = it },
+                onDismiss = { showSettings = false },
+            )
+        }
+    }
+}
+
+/**
+ * Compact mode toggle: a single standard IconButton showing the CURRENT mode
+ * (eye = currently editing, tap to preview; pencil = currently previewing, tap
+ * to edit). The whole control is the tap target.
+ */
+@Composable
+private fun ModeToggle(mode: Mode, onMode: (Mode) -> Unit) {
+    CompositionLocalProvider(LocalMinimumInteractiveComponentEnforcement provides false) {
+        IconButton(onClick = { onMode(if (mode == Mode.Edit) Mode.Preview else Mode.Edit) }) {
+            when (mode) {
+                Mode.Edit -> Icon(
+                    PreviewEyeIcon,
+                    contentDescription = "Switch to preview",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Mode.Preview -> Icon(
+                    Icons.Filled.Edit,
+                    contentDescription = "Switch to edit",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}

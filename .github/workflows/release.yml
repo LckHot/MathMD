@@ -1,0 +1,77 @@
+name: Release
+
+on:
+  push:
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install preview toolchain
+        working-directory: tools
+        run: npm install --no-audit --no-fund
+
+      - name: Preview pipeline regression tests
+        run: node tools/mdtest/run.js
+
+      - name: Build preview bundle
+        run: ./scripts/build-preview.sh
+
+      - name: Extract versionName
+        id: version
+        run: echo "name=$(grep -oE 'versionName = "[^"]+"' app/build.gradle.kts | cut -d'"' -f2)" >> "$GITHUB_OUTPUT"
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: Build release APK (self-signed, reproducible keystore)
+        run: ./gradlew :app:assembleRelease --console=plain
+        env:
+          MATHMD_RELEASE_STORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          MATHMD_RELEASE_STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+          MATHMD_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+
+      - name: Release APK fallback when no secrets configured
+        run: |
+          if ! ls app/build/outputs/apk/release/*release*.apk >/dev/null 2>&1; then
+            echo "RELEASE_SECRETS_MISSING=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: MathMD ${{ steps.version.outputs.name }}
+          body: |
+            MathMD ${{ steps.version.outputs.name }}
+
+            Minimal Android markdown reader for mathematicians with correct
+            rendering of all four TeX/LaTeX math delimiter styles
+            (`$...$`, `$$...$$`, `\(...\)`, `\[...\]`).
+
+            - **app-release.apk** — signed release build (recommended)
+            - **app-debug.apk** — debug build
+            - `$...$` vs `$5$`: see README "Known trade-off: dollar signs"
+
+            Install: download an APK and open it on the device (allow
+            "install unknown apps" for this app).
+          files: |
+            app/build/outputs/apk/debug/app-debug.apk
+            app/build/outputs/apk/release/app-release.apk

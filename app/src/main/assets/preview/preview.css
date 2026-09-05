@@ -1,0 +1,79 @@
+/* MathMD preview styling.
+ *
+ * Theme is driven by `data-theme` on <html> (set from the app settings via
+ * hostUpdate), NOT by prefers-color-scheme: the app is the single source of
+ * truth. Base font size/family come from --preview-font-* overrides. */
+
+:root, :root[data-theme='light'] {
+  --fg: #1c1b1f;
+  --bg: #fffbfe;
+  --code-bg: #f3edf7;
+  --error: #b3261e;
+  --border: #cac4d0;
+  --link: #6750a4;
+}
+
+:root[data-theme='dark'] {
+  --fg: #e6e0e9;
+  --bg: #1c1b1f;
+  --code-bg: #2b2930;
+  --error: #f2b8b5;
+  --border: #49454f;
+  --link: #d0bcff;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+#preview {
+  padding: 12px 16px 48px;
+  font-size: var(--preview-font-size, 16px);
+  font-family: var(--preview-font-family, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif);
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
+
+h1, h2, h3, h4 { line-height: 1.25; margin: 1.2em 0 0.5em; }
+
+a { color: var(--link); }
+
+pre, code {
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 0.9em;
+}
+
+pre {
+  background: var(--code-bg);
+  padding: 10px 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+code { background: var(--code-bg); padding: 1px 4px; border-radius: 4px; }
+pre code { background: transparent; padding: 0; }
+
+blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 0.9em;
+  border-inline-start: 3px solid var(--border);
+  color: color-mix(in srgb, var(--fg) 75%, transparent);
+}
+
+table { border-collapse: collapse; }
+th, td { border: 1px solid var(--border); padding: 4px 8px; }
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
+.math-error {
+  color: var(--error);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
