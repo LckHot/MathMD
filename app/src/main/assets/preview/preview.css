@@ -36,14 +36,6 @@ html, body {
   overflow-wrap: break-word;
 }
 
-/* Fixed content column (user setting): the page lays out at this width and
- * stays there — pinch-zoom then scales the whole page uniformly instead of
- * re-flowing text. Auto margins keep the column centered. */
-#preview {
-  max-width: var(--page-width, 100%);
-  margin-inline: auto;
-}
-
 h1, h2, h3, h4 { line-height: 1.25; margin: 1.2em 0 0.5em; }
 
 a { color: var(--link); }

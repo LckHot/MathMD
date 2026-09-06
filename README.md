@@ -33,9 +33,11 @@ spans/fences that must stay literal).
 - Edit / Preview flip toggle; configurable startup mode
 - Open via system file picker or "Open with…" from other apps; save in place or as a copy
 - Light/dark/system theme; per-pane font family and editor font size
-- Fixed page width in characters (optional): the page lays out once at that
-  width and pinch-zoom scales the whole page uniformly instead of re-flowing
-  text; over-wide formulas scroll horizontally under a line-pinned `\tag`
+- Fixed line width in characters (optional): the page wraps once at that
+  column and the default zoom fits it exactly to the screen (no horizontal
+  panning); pinch-zoom scales the whole page uniformly — zooming past the
+  fit level enables global horizontal panning, wrap never changes.
+  Over-wide formulas scroll horizontally under a line-pinned `\tag`
 - No network permission usage for the preview; the WebView is asset-sandboxed
 - No accounts, no telemetry, no ads
 

@@ -98,7 +98,7 @@ internal fun SettingsDialog(
                         onPick = onPreviewFont,
                     )
                 }
-                SettingRow("Page width in characters (0 = fill screen)") {
+                SettingRow("Line width in characters (0 = fill screen)") {
                     SizeField(pageWidthCh, onPageWidth, min = 0, max = 200)
                 }
             }

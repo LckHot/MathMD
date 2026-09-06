@@ -4,6 +4,50 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>MathMD Preview</title>
+  <script>
+    // Page-width boot: runs BEFORE first layout. The host (Kotlin) exposes
+    // MathMDNative via addJavascriptInterface before loadUrl:
+    //   getPageWidthChars()    chars per line, 0 = fill the screen
+    //   getPreviewFontFamily() CSS font-family for the preview ('' = default)
+    // The layout viewport is locked to (chars x 1ch + padding) CSS px using
+    // the SAME font the stylesheet will use, so text wraps once at the
+    // configured column and never re-flows. The WebView's overview fit makes
+    // that width fill the screen at default zoom (the minimum zoom, no
+    // horizontal panning); pinch-zooming in scales the fixed page and once
+    // it is wider than the screen, global horizontal panning appears —
+    // standard desktop-browser logic for a fixed-width page. Over-wide
+    // formulas keep their own inner scrollers regardless (see preview.css).
+    (function () {
+      var chars = 0, family = '';
+      try {
+        if (window.MathMDNative) {
+          if (typeof window.MathMDNative.getPageWidthChars === 'function') {
+            chars = window.MathMDNative.getPageWidthChars() | 0;
+          }
+          if (typeof window.MathMDNative.getPreviewFontFamily === 'function') {
+            family = String(window.MathMDNative.getPreviewFontFamily() || '');
+          }
+        }
+      } catch (e) { /* keep defaults: fill screen */ }
+      if (chars <= 0) return;
+      // Measure 1ch with a probe BEFORE any stylesheet applies, using the
+      // exact font the preview will render in (16px is the CSS default size;
+      // preview.css keeps #preview at that default).
+      var probe = document.createElement('span');
+      probe.style.cssText =
+        'position:absolute;top:0;left:0;display:block;width:100ch;height:0;' +
+        'overflow:hidden;font-size:16px;font-family:' + (family || 'sans-serif');
+      document.documentElement.appendChild(probe);
+      var chPx = probe.getBoundingClientRect().width / 100;
+      probe.remove();
+      if (chPx > 0) {
+        // 32px = #preview horizontal padding (16px each side)
+        var width = Math.round(chars * chPx) + 32;
+        document.querySelector('meta[name="viewport"]')
+          .setAttribute('content', 'width=' + width);
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="katex/katex.min.css">
   <link rel="stylesheet" href="preview.css">
   <script src="markdown-it.umd.min.js"></script>

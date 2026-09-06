@@ -225,15 +225,24 @@ const DISP = 'katex-display';
   check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
 }
 
-// 11. Page-width option drives the --page-width CSS var (the viewport-meta
-//     rewrite it also performs is a real-DOM concern, guarded off in the node
-//     stub; the CSS var is what the test harness can pin).
+// 11. Page-width contract lives in preview.html's boot script (viewport is
+//     locked BEFORE first layout; the bundle no longer touches it). Pin the
+//     host<->page contract statically so a refactor cannot silently break it.
 {
-  previewEl.innerHTML = '';
-  ctx.MathMD.hostUpdate('x', { pageWidthCh: 40 });
-  check('pageWidthCh sets --page-width', styleProps['--page-width'] === '40ch', JSON.stringify(styleProps));
-  ctx.MathMD.hostUpdate('x', { pageWidthCh: 0 });
-  check('pageWidthCh 0 clears --page-width', !('--page-width' in styleProps), JSON.stringify(styleProps));
+  const html = fs.readFileSync(path.join(ASSETS, 'preview.html'), 'utf8');
+  check(
+    'preview.html boot reads MathMDNative and rewrites viewport meta',
+    html.includes('MathMDNative.getPageWidthChars') &&
+      html.includes('MathMDNative.getPreviewFontFamily') &&
+      html.includes('meta[name="viewport"]') &&
+      html.includes('width='),
+    'boot script contract changed',
+  );
+  check(
+    'boot script runs before stylesheets',
+    html.indexOf('MathMDNative') < html.indexOf('katex.min.css'),
+    'viewport must be locked before first layout',
+  );
 }
 
 // ---- report ----
