@@ -102,19 +102,22 @@ const DISP = 'katex-display';
   check('emphasis around math intact', r.mathCount === 1 && r.html.includes('<em>em</em>') && r.html.includes('<em>em2</em>'), r.html);
 }
 
-// 3. $ pairing semantics (v1.0: no currency special-casing — Pandoc rules only)
+// 3. $ pairing semantics (post-1.0.1: STRICT rule — every unescaped $ is a
+//    math delimiter; no whitespace heuristics. Escape literal $ as \$.)
 {
+  // The two $ pair and are consumed; the trailing text stays prose.
   const r = renderMarkdown('it costs $100 and $200 total');
-  check('spaced dollar pairs stay prose (Pandoc inline rule)', r.mathCount === 0 && r.html.includes('$100') && r.html.includes('$200'), `count=${r.mathCount} html=${r.html}`);
+  check('first two unescaped $ pair, rest stays prose', r.mathCount === 1 && r.html.includes('200 total'), `count=${r.mathCount} html=${r.html}`);
 }
 {
+  // A single unescaped $ with NO second $ anywhere has no partner -> stays
+  // literal (pairing requires a closer; there is no end-of-text closing).
   const r = renderMarkdown('pay $5 now');
-  check('unmatched $ is literal', r.mathCount === 0 && r.html.includes('$5'), r.html);
+  check('lone $ without a second $ stays literal', r.mathCount === 0 && r.html.includes('$5'), `count=${r.mathCount} html=${r.html}`);
 }
 {
-  // The accepted v1.0 trade-off: no-space $..$ pairs ARE math, wherever they occur.
   const r = renderMarkdown('price is $5$ today');
-  check('no-space $..$ pairs as math (documented trade-off)', r.mathCount === 1, `count=${r.mathCount}`);
+  check('$..$ pairs as math', r.mathCount === 1, `count=${r.mathCount}`);
 }
 {
   // Owner-verified hazard (CJK): $ glued to CJK chars pairs across arbitrary
@@ -123,10 +126,8 @@ const DISP = 'katex-display';
   check('CJK-adjacent $ pairs across arbitrary text (mandates escaping)', r.mathCount === 1, `count=${r.mathCount} html=${r.html.slice(0, 140)}`);
 }
 {
-  // Guardrail evidence: spaced prose after/before a $ keeps it literal,
-  // so ordinary sentences with dollar amounts don't silently become math.
   const r = renderMarkdown('I paid $5 for X and got $3 back');
-  check('spaced prose after $ keeps it literal (guardrail)', r.mathCount === 0 && r.html.includes('$5') && r.html.includes('$3'), `count=${r.mathCount}`);
+  check('second $ closes the first pair; remainder prose', r.mathCount === 1 && r.html.includes('3 back'), `count=${r.mathCount} html=${r.html}`);
 }
 
 // 4. Code constructs shield math
@@ -202,6 +203,18 @@ const DISP = 'katex-display';
   previewEl.innerHTML = '';
   ctx.MathMD.hostUpdate('hi $x$', { theme: 'dark' });
   check('hostUpdate applies theme+font opts', doc.documentElement.dataset.theme === 'dark', JSON.stringify(doc.documentElement.dataset));
+}
+
+// 10. Equation tags land in the inline flow after the formula (not absolute-
+//     positioned at the right edge). CSS enforces the visual behavior; here we
+//     pin the DOM/level facts that make it possible: tag is a sibling AFTER
+//     the .katex-base content inside .katex-html.
+{
+  const r = renderMarkdown('$$x = y \\tag{L}$$');
+  const html = String(r.html);
+  const iBase = html.indexOf('katex-base');
+  const iTag = html.indexOf('katex-tag');
+  check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
 }
 
 // ---- report ----
