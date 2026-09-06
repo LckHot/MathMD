@@ -20,30 +20,38 @@ android {
         versionName = "1.1.0"
     }
 
+    // CI signing (GitHub Actions): secrets provide base64 keystore + passwords.
+    // BOTH variants then carry the release signature — debug included — so
+    // test builds install as upgrades over the released app (a runner-random
+    // debug key would be blocked with INSTALL_FAILED_UPDATE_INCOMPATIBLE).
+    // Locally (no env): release is unsigned, debug uses the standard debug
+    // keystore. Missing GH secrets arrive as EMPTY strings, not null.
+    val storeB64 = System.getenv("MATHMD_RELEASE_STORE_B64")
+    val storePass = System.getenv("MATHMD_RELEASE_STORE_PASS")
+    val keyAlias = System.getenv("MATHMD_RELEASE_KEY_ALIAS") ?: "mathmd"
+    val ciSigning = if (!storeB64.isNullOrEmpty() && !storePass.isNullOrEmpty()) {
+        val keystoreFile = layout.buildDirectory.file("release.keystore").get().asFile
+        keystoreFile.parentFile.mkdirs()
+        keystoreFile.writeBytes(Base64.getDecoder().decode(storeB64))
+        signingConfigs.create("release") {
+            storeFile = keystoreFile
+            storePassword = storePass
+            this.keyAlias = keyAlias
+            keyPassword = storePass
+        }
+    } else {
+        null
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // CI release signing: secrets provide base64 keystore + passwords.
-            // Locally (no env), assembleRelease still emits an unsigned APK.
-            val storeB64 = System.getenv("MATHMD_RELEASE_STORE_B64")
-            val storePass = System.getenv("MATHMD_RELEASE_STORE_PASS")
-            val keyAlias = System.getenv("MATHMD_RELEASE_KEY_ALIAS") ?: "mathmd"
-            // Missing GH secrets arrive as EMPTY strings, not null — guard both.
-            if (!storeB64.isNullOrEmpty() && !storePass.isNullOrEmpty()) {
-                val keystoreFile = layout.buildDirectory.file("release.keystore").get().asFile
-                keystoreFile.parentFile.mkdirs()
-                keystoreFile.writeBytes(Base64.getDecoder().decode(storeB64))
-                signingConfigs {
-                    create("release") {
-                        storeFile = keystoreFile
-                        storePassword = storePass
-                        this.keyAlias = keyAlias
-                        keyPassword = storePass
-                    }
-                }
-                signingConfig = signingConfigs.getByName("release")
-            }
+            ciSigning?.let { signingConfig = it }
+        }
+        debug {
+            // Test APKs from build-test.yml ship release-signed (see above).
+            ciSigning?.let { signingConfig = it }
         }
     }
 
