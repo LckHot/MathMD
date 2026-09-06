@@ -65,6 +65,14 @@ blockquote {
 table { border-collapse: collapse; }
 th, td { border: 1px solid var(--border); padding: 4px 8px; }
 
+/* Wide tables clip to the page width and scroll under the finger (host.ts
+ * wraps top-level tables); narrow tables are unaffected (no overflow). */
+.table-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;

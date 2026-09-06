@@ -481,6 +481,12 @@
         d.classList.add("wide");
       }
     }
+    for (const table of Array.from(root.querySelectorAll(":scope > table"))) {
+      const wrap = document.createElement("div");
+      wrap.className = "table-scroll";
+      root.insertBefore(wrap, table);
+      wrap.appendChild(table);
+    }
   }
   function randomSalt() {
     const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";

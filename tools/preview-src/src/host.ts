@@ -68,6 +68,18 @@ function postRender(root: HTMLElement): void {
       d.classList.add('wide');
     }
   }
+  // Tables: a wide table's min-content width would stretch the whole page
+  // past the locked viewport (breaking the "no global horizontal panning"
+  // guarantee at minimum zoom). Wrap top-level tables in a scroll container
+  // so they clip to the page width and scroll under the finger, like
+  // over-wide formulas. (innerHTML is replaced every render, so tables are
+  // always fresh children of root; nested ones are left alone.)
+  for (const table of Array.from(root.querySelectorAll(':scope > table'))) {
+    const wrap = document.createElement('div');
+    wrap.className = 'table-scroll';
+    root.insertBefore(wrap, table);
+    wrap.appendChild(table);
+  }
 }
 
 /**
