@@ -3,7 +3,8 @@
  *
  * The Android side pushes documents via `MathMD.hostUpdate(markdown, opts)`.
  * Failures are rendered INTO the page (fail-visible, never a silent black
- * screen) and are also reported back through `MathMD.hostLog` if present.
+ * screen); the Kotlin bridge logs the error string returned by its wrapped
+ * call.
  */
 
 import { renderMarkdown } from './render';
@@ -69,12 +70,25 @@ function postRender(root: HTMLElement): void {
   }
 }
 
+/**
+ * Collision-proof placeholder salt: a fresh random [A-Z0-9] salt per render
+ * makes it impossible for literal token-shaped text in the user's document
+ * (e.g. "MMATHMDPHK70MMM") to collide with this render's real placeholders —
+ * such literals then survive verbatim through the restore pass.
+ */
+function randomSalt(): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let s = '';
+  for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
 export function hostUpdate(markdown: string, opts?: HostOptions): void {
   const target = document.getElementById('preview');
   if (!target) return;
   try {
     if (opts) applyHostOptions(opts);
-    const result = renderMarkdown(markdown);
+    const result = renderMarkdown(markdown, { salt: randomSalt() });
     target.innerHTML = result.html;
     postRender(target);
     if (result.errors.length > 0) {

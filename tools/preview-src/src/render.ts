@@ -72,11 +72,14 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   let html = md.render(prot.text);
 
   // ---- restore code constructs verbatim ----
-  // Fence/indented tokens sit inside markdown-it's <pre><code>; inline-span
-  // tokens sit bare in a paragraph and get wrapped in <code> here.
+  // Fence/indented tokens sit INSIDE markdown-it's <pre><code>, so they are
+  // restored as plain escaped text (re-wrapping would nest <code> tags);
+  // indented-block lines keep their original 4-space/tab marker, which
+  // markdown-it stripped from the token line only — strip it per line here.
+  // Inline-span tokens sit bare in a paragraph and get wrapped in <code>.
   html = html.replace(new RegExp(CODE_TOKEN_SOURCE, 'g'), (tok) => {
     const seg = prot.code.find((s) => s.token === tok);
-    if (!seg) return tok;
+    if (!seg) return tok; // salt-mismatched literal token-shaped text: keep verbatim
     if (seg.raw.startsWith('`')) {
       const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
       let body = m ? m[2] : seg.raw;
@@ -86,7 +89,11 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
       }
       return `<code>${esc(body)}</code>`;
     }
-    return `<code>${esc(seg.raw)}</code>`;
+    const isIndented = /^ {4}|^\t/.test(seg.raw);
+    const body = isIndented
+      ? seg.raw.replace(/^ {4}/gm, '').replace(/^\t/gm, '')
+      : seg.raw;
+    return esc(body);
   });
 
   // ---- restore math through KaTeX ----

@@ -152,6 +152,32 @@ const DISP = 'katex-display';
   check('indented block shields math', r.mathCount === 0 && r.html.includes('<pre>'), r.html);
 }
 
+// 4b. Review fixes: escaped backticks, code-restore shape, salt collisions
+{
+  // #1: \` must NOT open a code span; markdown-it renders it as a literal `
+  const r = renderMarkdown('a \\`code\\` b');
+  check('escaped backticks stay literal (no fake code span)', !r.html.includes('<code>') && r.html.includes('`code`'), r.html);
+}
+{
+  // #4: fence/indented restores must not nest <code> inside markdown-it's
+  // <pre><code>, and the 4-space indent marker must be stripped.
+  const fence = renderMarkdown('```\n$$x$$\n```\nafter');
+  check('fence restore: no nested <code>', !/<code><code>/.test(fence.html), fence.html);
+  const ind = renderMarkdown('text\n\n    $x_i$ indented\n\nmore');
+  check('indented restore: no nested <code>', !/<code><code>/.test(ind.html), ind.html);
+  check('indented restore: indent marker stripped', ind.html.includes('<pre><code>$x_i$ indented'), ind.html);
+}
+{
+  // #2: literal token-shaped text must survive the app render path
+  // (hostUpdate now salts every render randomly; default K7 tokens in the
+  // document are not this render's tokens and must pass through verbatim).
+  previewEl.innerHTML = '';
+  ctx.MathMD.hostUpdate('keep MMATHMDPHK70MMM and $x$ real');
+  const html = String(previewEl.innerHTML);
+  check('literal token-shaped text survives hostUpdate (random salt)',
+    html.includes('MMATHMDPHK70MMM') && html.includes(K), html.slice(0, 200));
+}
+
 // 5. Escapes and fallbacks
 {
   const r = renderMarkdown('price is \\$5 today');

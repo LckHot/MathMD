@@ -96,7 +96,7 @@
       out += token;
       if (closeIdx >= 0) out += "\n" + source.slice(closeIdx, closeEol);
       if (closeIdx === -1) return n;
-      return closeEol < n ? closeEol : closeEol;
+      return closeEol;
     };
     const tryIndented = (p) => {
       if (!lineStart(p)) return -1;
@@ -145,6 +145,7 @@
     };
     const tryCodeSpan = (p) => {
       if (source[p] !== "`") return -1;
+      if (backslashRun(p) % 2 === 1) return -1;
       let k = 1;
       while (p + k < n && source[p + k] === "`") k++;
       let q = p + k;
@@ -184,7 +185,7 @@
         i = ni;
         continue;
       }
-      if (source[i] === "\\" && (source[i + 1] === "$" || source[i + 1] === "\\")) {
+      if (source[i] === "\\" && (source[i + 1] === "$" || source[i + 1] === "\\" || source[i + 1] === "`")) {
         out += source.substr(i, 2);
         i += 2;
         continue;
@@ -217,13 +218,15 @@
       if (!seg) return tok;
       if (seg.raw.startsWith("`")) {
         const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
-        let body = m ? m[2] : seg.raw;
-        if (body.startsWith(" ") && body.endsWith(" ") && body.length >= 2) {
-          body = body.slice(1, -1);
+        let body2 = m ? m[2] : seg.raw;
+        if (body2.startsWith(" ") && body2.endsWith(" ") && body2.length >= 2) {
+          body2 = body2.slice(1, -1);
         }
-        return `<code>${esc(body)}</code>`;
+        return `<code>${esc(body2)}</code>`;
       }
-      return `<code>${esc(seg.raw)}</code>`;
+      const isIndented = /^ {4}|^\t/.test(seg.raw);
+      const body = isIndented ? seg.raw.replace(/^ {4}/gm, "").replace(/^\t/gm, "") : seg.raw;
+      return esc(body);
     });
     html = html.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok) => {
       const seg = prot.math.find((s) => s.token === tok);
@@ -276,12 +279,18 @@
       }
     }
   }
+  function randomSalt() {
+    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    let s = "";
+    for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  }
   function hostUpdate(markdown, opts) {
     const target = document.getElementById("preview");
     if (!target) return;
     try {
       if (opts) applyHostOptions(opts);
-      const result = renderMarkdown(markdown);
+      const result = renderMarkdown(markdown, { salt: randomSalt() });
       target.innerHTML = result.html;
       postRender(target);
       if (result.errors.length > 0) {

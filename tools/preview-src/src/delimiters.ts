@@ -179,7 +179,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     out += token;
     if (closeIdx >= 0) out += '\n' + source.slice(closeIdx, closeEol);
     if (closeIdx === -1) return n;
-    return closeEol < n ? closeEol : closeEol; // trailing \n (if any) handled by main loop
+    return closeEol; // trailing \n (if any) handled by main loop
   };
 
   /**
@@ -237,6 +237,8 @@ export function protectMath(source: string, salt = 'K7'): Protection {
   /** Inline code span (backtick run with matching run of equal length). */
   const tryCodeSpan = (p: number): number => {
     if (source[p] !== '`') return -1;
+    // An escaped opener (\`) is not a code span in CommonMark.
+    if (backslashRun(p) % 2 === 1) return -1;
     let k = 1;
     while (p + k < n && source[p + k] === '`') k++;
     let q = p + k;
@@ -265,8 +267,10 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     if (ni >= 0) { i = ni; continue; }
     ni = tryMath(i);
     if (ni >= 0) { i = ni; continue; }
-    // stepped-over escapes: \$ and \\ stay for the markdown parser
-    if (source[i] === '\\' && (source[i + 1] === '$' || source[i + 1] === '\\')) {
+    // stepped-over escapes: \$ \\ \` stay literal for the markdown parser;
+    // without the \` case an escaped backtick would open a fake code span
+    // (the backslash gets emitted, then the bare ` matches as opener).
+    if (source[i] === '\\' && (source[i + 1] === '$' || source[i + 1] === '\\' || source[i + 1] === '`')) {
       out += source.substr(i, 2);
       i += 2;
       continue;
