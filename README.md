@@ -23,7 +23,7 @@ any math renderer sees them.
 
 MathMD extracts math segments **before** markdown parsing (a
 protection/placeholder pass), so all four delimiter styles survive intact.
-The pass is written in TypeScript and covered by a 27-case regression suite
+The pass is written in TypeScript and covered by a regression suite
 (including `$\{x\}$`, inline pairs, `$W^{1,p}_0(\Omega)$`, and code
 spans/fences that must stay literal).
 

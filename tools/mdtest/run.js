@@ -251,6 +251,30 @@ const DISP = 'katex-display';
   check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
 }
 
+// 12. Contract drift guards (blind-review #17 #18): the Kotlin bridge fallback
+//     font stack and the +32px padding arithmetic must stay byte-identical to
+//     what preview.css actually uses, or the chars->px viewport measurement
+//     silently drifts from the rendered layout.
+{
+  const css = fs.readFileSync(path.join(ASSETS, 'preview.css'), 'utf8');
+  const kt = fs.readFileSync(
+    path.join(ROOT, 'app', 'src', 'main', 'java', 'io', 'github', 'lckhot', 'mathmd', 'PreviewPane.kt'),
+    'utf8');
+  const cssFallback = /--preview-font-family,\s*([^)]+)\)/.exec(css)?.[1] ?? '';
+  const ktFallback = /cssFontFamily[\s\S]*?\?\:\s*"([^"]+)"/.exec(kt)?.[1] ?? '';
+  const norm = (s) => s.replace(/["']/g, '').replace(/\s+/g, ' ').trim();
+  check('Kotlin bridge font fallback == CSS fallback (drift guard)',
+    cssFallback.length > 0 && norm(cssFallback) === norm(ktFallback),
+    `css="${cssFallback}" kt="${ktFallback}"`);
+
+  const html = fs.readFileSync(path.join(ASSETS, 'preview.html'), 'utf8');
+  const cssPad = /#preview\s*\{[^}]*padding:\s*[\d.]+px\s+([\d.]+)px/.exec(css)?.[1] ?? '';
+  const htmlPad = /\/\/ 32px = #preview horizontal padding/.test(html) &&
+    /Math\.round\(chars \* chPx\) \+ 32/.test(html);
+  check('boot +32px padding == 2x CSS #preview horizontal padding (drift guard)',
+    (cssPad === '16.0' || cssPad === '16') && htmlPad, `cssPad=${cssPad} htmlContract=${htmlPad}`);
+}
+
 // 11. Page-width contract lives in preview.html's boot script (viewport is
 //     locked BEFORE first layout; the bundle no longer touches it). Pin the
 //     host<->page contract statically so a refactor cannot silently break it.

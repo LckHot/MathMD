@@ -1,15 +1,13 @@
 {
-  "name": "tools",
+  "name": "mathmd-tools",
+  "private": true,
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "description": "Build toolchain for the MathMD preview pipeline (esbuild bundle + tsc type check)",
+  "license": "MIT",
   "type": "commonjs",
+  "scripts": {
+    "test": "node mdtest/run.js"
+  },
   "devDependencies": {
     "esbuild": "^0.28.2",
     "typescript": "^7.0.2"

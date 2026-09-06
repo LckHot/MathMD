@@ -40,6 +40,9 @@ jobs:
       - name: Build preview bundle
         run: ./scripts/build-preview.sh
 
+      - name: Shipped bundle matches TypeScript sources
+        run: git diff --exit-code app/src/main/assets/preview/bundle.js
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --console=plain
 

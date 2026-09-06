@@ -38,6 +38,22 @@ jobs:
       - name: Build preview bundle
         run: ./scripts/build-preview.sh
 
+      - name: Shipped bundle matches TypeScript sources
+        # mdtest tests a freshly built bundle; the APK ships the committed
+        # one. If this fails, run scripts/build-preview.sh and commit the
+        # regenerated bundle.js.
+        run: git diff --exit-code app/src/main/assets/preview/bundle.js
+
+      - name: Tag matches versionName
+        # Release titles come from the tag; versionName/versionCode come from
+        # gradle. A mismatch ships an update the package manager may reject.
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          VN=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          if [ "v${VN}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} != v${VN} in build.gradle.kts" && exit 1
+          fi
+
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --console=plain
 
