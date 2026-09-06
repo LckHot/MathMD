@@ -138,6 +138,16 @@ const DISP = 'katex-display';
   check('second $ closes the first pair; remainder prose', r.mathCount === 1 && r.html.includes('3 back'), `count=${r.mathCount} html=${r.html}`);
 }
 
+// 4c. CJK emphasis (markdown-it-cjk-friendly): CommonMark rejects )**汉字
+//     closers; the plugin must restore bold/italic in CJK prose.
+{
+  const r = renderMarkdown('经典线索为：Dyer−Edmunds (1970) 的初步结果；**Kim−Kozono (2006)**证明若 $u(x)=o(1/|x|)$ 成立');
+  check('CJK: **X (2006)**证明 bolds despite ASCII-paren closer + CJK next',
+    r.mathCount === 1 && r.html.includes('<strong>Kim−Kozono (2006)</strong>'), r.html.slice(0, 200));
+  const i = renderMarkdown('结果 *重要*这里继续');
+  check('CJK: *italic* before CJK char', i.html.includes('<em>重要</em>'), i.html);
+}
+
 // 4. Code constructs shield math
 {
   const r = renderMarkdown('use `$x_i$` literally');

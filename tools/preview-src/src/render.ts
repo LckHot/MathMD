@@ -16,6 +16,12 @@ import {
   MATH_TOKEN_SOURCE,
   CODE_TOKEN_SOURCE,
 } from './delimiters';
+// MIT, https://github.com/tats-u/markdown-cjk-friendly — CommonMark's
+// right-flanking rules reject `)**汉字` as a closing emphasis delimiter
+// (the char after the closer is a LETTER in Unicode), silently breaking
+// bold/italic in CJK prose. The plugin amends the emphasis rules for CJK;
+// bundled into the pipeline below, no standalone artifact.
+import cjkFriendly from 'markdown-it-cjk-friendly';
 
 export { protectMath } from './delimiters';
 export type { Protection, MathSegment, CodeSegment } from './delimiters';
@@ -40,8 +46,13 @@ export interface RenderResult {
   readonly errors: readonly MathError[];
 }
 
+interface MarkdownItLike {
+  render: (src: string) => string;
+  use: (plugin: unknown, ...params: unknown[]) => MarkdownItLike;
+}
+
 interface VendorGlobals {
-  markdownit?: (opts?: Record<string, unknown>) => { render: (src: string) => string };
+  markdownit?: (opts?: Record<string, unknown>) => MarkdownItLike;
   katex?: {
     renderToString: (tex: string, opts?: Record<string, unknown>) => string;
   };
@@ -69,6 +80,7 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
 
   const prot = protectMath(source, salt);
   const md = v.markdownit({ html: false, linkify: true });
+  md.use(cjkFriendly);
   let html = md.render(prot.text);
 
   // ---- restore code constructs verbatim ----
