@@ -494,11 +494,90 @@
     for (let i = 0; i < 6; i++) s += chars[Math.floor(Math.random() * chars.length)];
     return s;
   }
+  function textNodesUnder(root) {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        let p = node.parentElement;
+        while (p && p !== root) {
+          const cn = p.className;
+          if (typeof cn === "string" && cn.includes("katex-mathml") || p.tagName === "SCRIPT" || p.tagName === "STYLE") {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return node.nodeValue && node.nodeValue.length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const out = [];
+    while (walker.nextNode()) out.push(walker.currentNode);
+    return out;
+  }
+  function clearFind() {
+    const g = globalThis;
+    if (g.CSS?.highlights) {
+      g.CSS.highlights.delete("mathmd-find");
+      g.CSS.highlights.delete("mathmd-find-active");
+    } else {
+      const sel = window.getSelection?.();
+      sel?.removeAllRanges();
+    }
+  }
+  function paint(ranges, active) {
+    const g = globalThis;
+    if (g.CSS?.highlights && g.Highlight) {
+      const others = ranges.filter((_, i) => i !== active);
+      g.CSS.highlights.set("mathmd-find", new g.Highlight(...others));
+      if (ranges[active]) g.CSS.highlights.set("mathmd-find-active", new g.Highlight(ranges[active]));
+      else g.CSS.highlights.delete("mathmd-find-active");
+      return;
+    }
+    const sel = window.getSelection?.();
+    sel?.removeAllRanges();
+    if (ranges[active]) sel?.addRange(ranges[active]);
+  }
+  function scrollToRange(range) {
+    const marker = document.createElement("span");
+    marker.style.cssText = "display:inline;width:0;height:0";
+    const r = range.cloneRange();
+    r.collapse(true);
+    r.insertNode(marker);
+    marker.scrollIntoView({ block: "center", inline: "center" });
+    marker.remove();
+  }
+  function find(query, active) {
+    const target = document.getElementById("preview");
+    if (!target || !query || typeof document.createTreeWalker !== "function") {
+      clearFind();
+      return { total: 0, active: -1 };
+    }
+    const q = query.toLowerCase();
+    const ranges = [];
+    for (const node of textNodesUnder(target)) {
+      const data = (node.nodeValue ?? "").toLowerCase();
+      let i = data.indexOf(q);
+      while (i !== -1) {
+        const r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + q.length);
+        ranges.push(r);
+        i = data.indexOf(q, i + q.length);
+      }
+    }
+    if (ranges.length === 0) {
+      clearFind();
+      return { total: 0, active: -1 };
+    }
+    const idx = active >= 0 && active < ranges.length ? active : 0;
+    paint(ranges, idx);
+    scrollToRange(ranges[idx]);
+    return { total: ranges.length, active: idx };
+  }
   function hostUpdate(markdown, opts) {
     const target = document.getElementById("preview");
     if (!target) return;
     try {
       if (opts) applyHostOptions(opts);
+      clearFind();
       const result = renderMarkdown(markdown, { salt: randomSalt() });
       target.innerHTML = result.html;
       postRender(target);
@@ -514,7 +593,7 @@ ${escapeHtml(message)}</pre>`;
     }
   }
   var bridge = globalThis;
-  bridge.MathMD = { ...bridge.MathMD ?? {}, hostUpdate };
+  bridge.MathMD = { ...bridge.MathMD ?? {}, hostUpdate, find };
   document.addEventListener("DOMContentLoaded", () => {
     const target = document.getElementById("preview");
     if (target && target.childElementCount === 0) {

@@ -127,3 +127,13 @@ th, td { border: 1px solid var(--border); padding: 4px 8px; }
   font-family: ui-monospace, Menlo, Consolas, monospace;
   white-space: pre-wrap;
 }
+
+/* In-document search (CSS Custom Highlight API; ignored wholesale on
+ * engines without it — the JS falls back to native selection there). */
+::highlight(mathmd-find) {
+  background-color: rgba(255, 200, 0, 0.35);
+}
+::highlight(mathmd-find-active) {
+  background-color: rgba(255, 110, 0, 0.9);
+  color: #fff;
+}

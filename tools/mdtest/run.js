@@ -261,6 +261,19 @@ const DISP = 'katex-display';
   check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
 }
 
+// 11. Search bridge: MathMD.find must be registered for Kotlin and must
+//     fail safe (no throw, zero count) on a DOM without TreeWalker — the
+//     real matching/highlighting behavior is browser-only (Custom Highlight
+//     API) and verified by hand per AGENTS.md policy.
+{
+  check('MathMD.find registered on the bridge', typeof ctx.MathMD.find === 'function', typeof ctx.MathMD.find);
+  previewEl.innerHTML = '';
+  ctx.MathMD.hostUpdate('hello $x$');
+  let res = null, threw = null;
+  try { res = ctx.MathMD.find('hello', 0); } catch (e) { threw = e.message; }
+  check('find fails safe on the DOM stub', threw === null && res && res.total === 0 && res.active === -1, `threw=${threw} res=${JSON.stringify(res)}`);
+}
+
 // 12. Contract drift guards (blind-review #17 #18): the Kotlin bridge fallback
 //     font stack and the +32px padding arithmetic must stay byte-identical to
 //     what preview.css actually uses, or the chars->px viewport measurement

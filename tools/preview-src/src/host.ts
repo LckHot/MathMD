@@ -95,11 +95,124 @@ function randomSalt(): string {
   return s;
 }
 
+/**
+ * In-document search for the preview (owner feature). STATELESS: the caller
+ * (Kotlin) owns the cursor; this paints all matches with the CSS Custom
+ * Highlight API (Chromium >= 105; zero DOM mutation, so KaTeX layout never
+ * re-flows), the active match in its own color, clamps `active` into range,
+ * and scrolls it into view through every nested scroll container (formulas
+ * and tables scroll internally). Fallback on engines without the API:
+ * native selection of the active match only (counting is a pure text walk
+ * and always works). `.katex-mathml` is skipped: it duplicates every
+ * formula's text invisibly and would double-count.
+ */
+export interface FindResult {
+  total: number;
+  active: number;
+}
+
+function textNodesUnder(root: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Node): number {
+      let p = node.parentElement;
+      while (p && p !== root) {
+        const cn = p.className;
+        if (
+          (typeof cn === 'string' && cn.includes('katex-mathml')) ||
+          p.tagName === 'SCRIPT' ||
+          p.tagName === 'STYLE'
+        ) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        p = p.parentElement;
+      }
+      return node.nodeValue && node.nodeValue.length
+        ? NodeFilter.FILTER_ACCEPT
+        : NodeFilter.FILTER_REJECT;
+    },
+  });
+  const out: Text[] = [];
+  while (walker.nextNode()) out.push(walker.currentNode as Text);
+  return out;
+}
+
+function clearFind(): void {
+  const g = globalThis as {
+    CSS?: { highlights?: Map<string, unknown> };
+  };
+  if (g.CSS?.highlights) {
+    g.CSS.highlights.delete('mathmd-find');
+    g.CSS.highlights.delete('mathmd-find-active');
+  } else {
+    const sel = window.getSelection?.();
+    sel?.removeAllRanges();
+  }
+}
+
+function paint(ranges: Range[], active: number): void {
+  const g = globalThis as {
+    CSS?: { highlights?: Map<string, unknown> };
+    Highlight?: new (...nodes: (Range | Node)[]) => unknown;
+  };
+  if (g.CSS?.highlights && g.Highlight) {
+    const others = ranges.filter((_, i) => i !== active);
+    g.CSS.highlights.set('mathmd-find', new g.Highlight(...others));
+    if (ranges[active]) g.CSS.highlights.set('mathmd-find-active', new g.Highlight(ranges[active]));
+    else g.CSS.highlights.delete('mathmd-find-active');
+    return;
+  }
+  const sel = window.getSelection?.();
+  sel?.removeAllRanges();
+  if (ranges[active]) sel?.addRange(ranges[active]);
+}
+
+/** Scroll `range` into view through ALL nested scrollers via a marker. */
+function scrollToRange(range: Range): void {
+  const marker = document.createElement('span');
+  marker.style.cssText = 'display:inline;width:0;height:0';
+  const r = range.cloneRange();
+  r.collapse(true);
+  r.insertNode(marker);
+  marker.scrollIntoView({ block: 'center', inline: 'center' });
+  marker.remove();
+}
+
+export function find(query: string, active: number): FindResult {
+  const target = document.getElementById('preview');
+  if (!target || !query || typeof document.createTreeWalker !== 'function') {
+    clearFind();
+    return { total: 0, active: -1 };
+  }
+  const q = query.toLowerCase();
+  const ranges: Range[] = [];
+  for (const node of textNodesUnder(target)) {
+    const data = (node.nodeValue ?? '').toLowerCase();
+    let i = data.indexOf(q);
+    while (i !== -1) {
+      const r = document.createRange();
+      r.setStart(node, i);
+      r.setEnd(node, i + q.length);
+      ranges.push(r);
+      i = data.indexOf(q, i + q.length);
+    }
+  }
+  if (ranges.length === 0) {
+    clearFind();
+    return { total: 0, active: -1 };
+  }
+  const idx = active >= 0 && active < ranges.length ? active : 0;
+  paint(ranges, idx);
+  scrollToRange(ranges[idx]);
+  return { total: ranges.length, active: idx };
+}
+
 export function hostUpdate(markdown: string, opts?: HostOptions): void {
   const target = document.getElementById('preview');
   if (!target) return;
   try {
     if (opts) applyHostOptions(opts);
+    // innerHTML replacement orphans old match ranges/highlights.
+    clearFind();
     const result = renderMarkdown(markdown, { salt: randomSalt() });
     target.innerHTML = result.html;
     postRender(target);
@@ -117,7 +230,7 @@ export function hostUpdate(markdown: string, opts?: HostOptions): void {
 
 // Bridge registration (Kotlin calls these via evaluateJavascript).
 const bridge = globalThis as unknown as Record<string, unknown>;
-bridge.MathMD = { ...(bridge.MathMD as object | undefined ?? {}), hostUpdate };
+bridge.MathMD = { ...(bridge.MathMD as object | undefined ?? {}), hostUpdate, find };
 
 // Initial state so the pane is never a mystery: show an explicit empty note
 // until the first document arrives.

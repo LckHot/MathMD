@@ -21,6 +21,7 @@ private class PreviewState {
     var ready: Boolean = false
     var latestMarkdown: String = ""
     var latestOptions: String = "{}"
+    var lastSearchTick: Int = -1
 }
 
 /**
@@ -50,6 +51,7 @@ internal fun PreviewPane(
     reloadKey: Any,
     appSettings: Settings,
     visible: Boolean,
+    search: PreviewSearchSpec? = null,
     modifier: Modifier = Modifier,
 ) {
     val state = remember { PreviewState() }
@@ -125,6 +127,13 @@ internal fun PreviewPane(
                 st.latestMarkdown = source
                 st.latestOptions = options
                 if (st.ready && visible) pushDocument(view, source, options)
+                // Search request: run when a fresh tick arrives while the
+                // page is visible and ready (mode flip re-pushes the doc and
+                // bumps the tick, so the highlight follows).
+                if (search != null && st.ready && visible && search.tick != st.lastSearchTick) {
+                    st.lastSearchTick = search.tick
+                    findInPreview(view, search.query, search.index) { t, a -> search.onResult(t, a) }
+                }
             },
         )
     }
@@ -158,6 +167,31 @@ private fun pushDocument(view: WebView, markdown: String, optionsJson: String) {
     view.evaluateJavascript(js) { result ->
         if (result != null && result.contains("MATHMD-BRIDGE-ERR")) {
             android.util.Log.e("MathMD", "preview bridge failure: $result")
+        }
+    }
+}
+
+/**
+ * Run/find in the rendered preview via MathMD.find (CSS Custom Highlight
+ * API on the page side). Reports (total, active) back on the UI thread;
+ * a bridge failure reports (0, -1) instead of hanging the UI.
+ */
+internal fun findInPreview(
+    view: WebView,
+    query: String,
+    index: Int,
+    onResult: (total: Int, active: Int) -> Unit,
+) {
+    val expr = "JSON.stringify(MathMD.find(${JSONObject.quote(query)}, $index))"
+    view.evaluateJavascript(expr) { result ->
+        // evaluateJavascript returns a JSON-quoted string for string results
+        val json = result?.removeSurrounding("\"")?.replace("\\\"", "\"")
+        try {
+            val o = JSONObject(json ?: "{}")
+            onResult(o.optInt("total"), o.optInt("active"))
+        } catch (_: Exception) {
+            android.util.Log.e("MathMD", "find bridge failure: $result")
+            onResult(0, -1)
         }
     }
 }

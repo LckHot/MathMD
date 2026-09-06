@@ -135,6 +135,15 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     var openInNewWindow by remember { mutableStateOf(false) }
     var pendingOpenAfterSave by remember { mutableStateOf(false) }
 
+    // Search: cursor lives HERE, shared by both panes (owner spec: search
+    // works in Edit and Preview; flipping modes re-runs the same query).
+    var searchOpen by rememberSaveable { mutableStateOf(false) }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var searchIndex by remember { mutableStateOf(0) }
+    var searchTick by remember { mutableStateOf(0) }
+    var searchResult by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    fun requestSearch() { searchTick++ }
+
     val resolver = context.contentResolver
     // Single-threaded IO: quick successive opens complete in order
     // (last-writer-wins is the wanted semantics; raw threads raced).
@@ -302,6 +311,24 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     val systemDark = isSystemInDarkTheme()
     val appDark = isDarkTheme(themeMode, systemDark)
 
+    // One search spec always live; query collapses to "" when the bar is
+    // closed so either pane clears its highlights on the final run.
+    val editorSearch = EditorSearchSpec(
+        query = if (searchOpen) searchQuery else "",
+        index = searchIndex,
+        tick = searchTick,
+        onResult = { total, active ->
+            searchResult = total to active
+            searchIndex = active.coerceAtLeast(0)
+        },
+    )
+    val previewSearch = PreviewSearchSpec(
+        query = editorSearch.query,
+        index = searchIndex,
+        tick = searchTick,
+        onResult = editorSearch.onResult,
+    )
+
     MaterialTheme(colorScheme = if (appDark) darkColorScheme() else lightColorScheme()) {
         Scaffold(
             topBar = {
@@ -316,7 +343,13 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
                         )
                     },
                     actions = {
-                        ModeToggle(mode) { mode = it }
+                        ModeToggle(mode) {
+                            mode = it
+                            // Preview re-pushes its document on flip (clearing
+                            // highlights); bump the tick so find re-runs. The
+                            // editor re-enters composition and re-runs itself.
+                            if (searchOpen) requestSearch()
+                        }
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Filled.Menu, contentDescription = "Menu")
                         }
@@ -346,6 +379,14 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
                                 },
                             )
                             DropdownMenuItem(
+                                text = { Text("Search") },
+                                onClick = {
+                                    menuOpen = false
+                                    searchOpen = true
+                                    requestSearch()
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Settings") },
                                 onClick = {
                                     menuOpen = false
@@ -358,6 +399,29 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
             },
         ) { padding ->
             Column(modifier = Modifier.padding(padding).fillMaxSize()) {
+                if (searchOpen) {
+                    SearchBar(
+                        query = searchQuery,
+                        result = searchResult,
+                        onQuery = {
+                            searchQuery = it
+                            searchIndex = 0
+                            requestSearch()
+                        },
+                        onStep = { dir ->
+                            val total = searchResult?.first ?: 0
+                            if (total > 0) {
+                                searchIndex = (searchIndex + dir + total) % total
+                            }
+                            requestSearch()
+                        },
+                        onClose = {
+                            searchOpen = false
+                            searchResult = null
+                            requestSearch() // panes clear highlights
+                        },
+                    )
+                }
                 // WebView stays alive across mode switches (no recreate + page
                 // reload flash); Edit mode covers it with an opaque surface.
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -366,6 +430,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
                         reloadKey = previewReloadKey,
                         appSettings = settings,
                         visible = mode == Mode.Preview,
+                        search = previewSearch,
                         modifier = Modifier.fillMaxSize(),
                     )
                     if (mode == Mode.Edit) {
@@ -376,6 +441,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
                             EditorPane(
                                 text, editorFontSize, editorFont,
                                 Modifier.fillMaxSize(),
+                                search = editorSearch,
                             ) { text = it }
                         }
                     }
