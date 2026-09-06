@@ -1,16 +1,17 @@
 name: Build test APK
 
-# Manual test builds ONLY (Actions page → Build test APK → Run workflow):
-# regression tests + debug APK uploaded as a workflow artifact. No release
-# build, no signing secrets, nothing is published. Real releases go through
-# release.yml, which stays tag-only (push v* => tests + debug + signed
-# release APK + GitHub Release).
+# MANUAL ONLY (Actions page → Build test APK → Run workflow): regression
+# tests + debug APK published to the rolling "test-build" PRERELEASE.
+# Never triggers on pushes. The prerelease is not "latest" (v1.x releases
+# keep that badge) and its asset is overwritten each run — the download
+# page needs no GitHub login, unlike workflow artifacts. Real releases go
+# through release.yml (tag v* => signed release + publish).
 
 on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   test-build:
@@ -46,8 +47,31 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --console=plain
 
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
+      - name: Move rolling tag to this commit
+        # action-gh-release does NOT move an existing tag, so without this
+        # the second run would publish a new APK under the first commit's
+        # tag. Force-moving `test-build` keeps the release pointing at the
+        # commit actually built. (Does not trigger release.yml: no v* match.)
+        run: |
+          git tag -f test-build
+          git push -f origin refs/tags/test-build
+
+      - name: Publish rolling test prerelease
+        # Fixed tag `test-build` (no v* prefix => release.yml never fires on
+        # it); asset overwritten every run, so the link never goes stale.
+        # Signed with the release key (ac1ca1e) => installs over released
+        # versions without uninstalling.
+        uses: softprops/action-gh-release@v3
         with:
-          name: mathmd-test-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          tag_name: test-build
+          name: MathMD test build (rolling)
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          generate_release_notes: false
+          body: |
+            Rolling debug build from `${{ github.sha }}` — manual trigger only.
+            Signed with the release key (installs as an upgrade over released
+            versions). Not an official release; official versions live in
+            Releases under `v*` tags.
+          files: app/build/outputs/apk/debug/app-debug.apk
