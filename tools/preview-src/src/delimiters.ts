@@ -12,13 +12,12 @@
  *   $$...$$   display       \[...\]   display
  *   $...$     inline        \(...\)   inline
  *
- * Rules (Pandoc-flavoured):
- *  - Inline `$` opener: unescaped, next char exists, is not whitespace and
- *    not `$`; closer: unescaped (odd backslash-run before it fails) and
- *    previous char not whitespace.
- *  - There is deliberately NO currency special-casing: `$` is a math
- *    delimiter whenever it pairs. Documents mixing literal dollar amounts
- *    with math can mis-pair — foreseeable, accepted (owner call, v1.0).
+ * Rules (owner call, post-1.0.1 — matches the README's stated dollar rule):
+ *  - Every UNESCAPED `$` is a math delimiter, period. `$$` is checked first
+ *    (display), then a single `$` pairs with the next unescaped `$`. There
+ *    are NO whitespace/opening-closing heuristics — they were fragile and
+ *    defeated by real documents. Literal dollar signs MUST be escaped
+ *    (`\$`) or placed inside code spans; a bare `$` is never prose.
  *  - `\`` `` ` `` `\$` `\\` are stepped over so the markdown parser handles
  *    them natively and the scanner never opens math on an escaped `$`.
  *  - Fenced code blocks (``` / ~~~), indented code blocks and inline code
@@ -65,10 +64,6 @@ export const CODE_TOKEN_SOURCE = 'MCODEPH[A-Z0-9]{1,8}[0-9]+MMM';
 
 const SALT_RE = /^[A-Z0-9]{1,8}$/;
 
-function isWhitespace(ch: string | undefined): boolean {
-  return ch !== undefined && /\s/.test(ch);
-}
-
 export function protectMath(source: string, salt = 'K7'): Protection {
   if (!SALT_RE.test(salt)) {
     throw new Error(`salt must match ${SALT_RE}, got "${salt}"`);
@@ -102,12 +97,10 @@ export function protectMath(source: string, salt = 'K7'): Protection {
   const scanCloser = (
     start: number,
     closer: string,
-    requireNonWsBefore: boolean,
   ): number => {
     for (let j = start; j < n; j++) {
       if (!source.startsWith(closer, j)) continue;
       if (backslashRun(j) % 2 === 1) continue;
-      if (requireNonWsBefore && j > start && isWhitespace(source[j - 1])) continue;
       return j;
     }
     return -1;
@@ -124,22 +117,22 @@ export function protectMath(source: string, salt = 'K7'): Protection {
   const tryMath = (p: number): number => {
     const two = source.substr(p, 2);
     if (two === '$$') {
-      const c = scanCloser(p + 2, '$$', false);
+      const c = scanCloser(p + 2, '$$');
       return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
     }
     if (two === '\\[') {
-      const c = scanCloser(p + 2, '\\]', false);
+      const c = scanCloser(p + 2, '\\]');
       return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
     }
     if (two === '\\(') {
-      const c = scanCloser(p + 2, '\\)', false);
+      const c = scanCloser(p + 2, '\\)');
       return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, false);
     }
     if (source[p] === '$') {
       const nx = source[p + 1];
-      // opener: next char must exist, not be whitespace, not be '$'
-      if (nx === undefined || /\s/.test(nx) || nx === '$') return skipOne(p);
-      const c = scanCloser(p + 1, '$', true);
+      // opener: next char must exist and not be '$' (which would mean $$)
+      if (nx === undefined || nx === '$') return skipOne(p);
+      const c = scanCloser(p + 1, '$');
       if (c === -1 || c === p + 1) return skipOne(p);
       return pushMath(p, 1, c, 1, false);
     }

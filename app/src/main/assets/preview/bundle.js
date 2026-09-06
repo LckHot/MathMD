@@ -4,9 +4,6 @@
   var MATH_TOKEN_SOURCE = "MMATHMDPH[A-Z0-9]{1,8}[0-9]+MMM";
   var CODE_TOKEN_SOURCE = "MCODEPH[A-Z0-9]{1,8}[0-9]+MMM";
   var SALT_RE = /^[A-Z0-9]{1,8}$/;
-  function isWhitespace(ch) {
-    return ch !== void 0 && /\s/.test(ch);
-  }
   function protectMath(source, salt = "K7") {
     if (!SALT_RE.test(salt)) {
       throw new Error(`salt must match ${SALT_RE}, got "${salt}"`);
@@ -27,11 +24,10 @@
       while (j - 1 - k >= 0 && source[j - 1 - k] === "\\") k++;
       return k;
     };
-    const scanCloser = (start, closer, requireNonWsBefore) => {
+    const scanCloser = (start, closer) => {
       for (let j = start; j < n; j++) {
         if (!source.startsWith(closer, j)) continue;
         if (backslashRun(j) % 2 === 1) continue;
-        if (requireNonWsBefore && j > start && isWhitespace(source[j - 1])) continue;
         return j;
       }
       return -1;
@@ -45,21 +41,21 @@
     const tryMath = (p) => {
       const two = source.substr(p, 2);
       if (two === "$$") {
-        const c = scanCloser(p + 2, "$$", false);
+        const c = scanCloser(p + 2, "$$");
         return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
       }
       if (two === "\\[") {
-        const c = scanCloser(p + 2, "\\]", false);
+        const c = scanCloser(p + 2, "\\]");
         return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
       }
       if (two === "\\(") {
-        const c = scanCloser(p + 2, "\\)", false);
+        const c = scanCloser(p + 2, "\\)");
         return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, false);
       }
       if (source[p] === "$") {
         const nx = source[p + 1];
-        if (nx === void 0 || /\s/.test(nx) || nx === "$") return skipOne(p);
-        const c = scanCloser(p + 1, "$", true);
+        if (nx === void 0 || nx === "$") return skipOne(p);
+        const c = scanCloser(p + 1, "$");
         if (c === -1 || c === p + 1) return skipOne(p);
         return pushMath(p, 1, c, 1, false);
       }
