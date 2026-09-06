@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -32,6 +33,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -54,17 +56,26 @@ class MainActivity : ComponentActivity() {
     /** Documents arriving via ACTION_VIEW (file manager, chat apps). */
     private val viewUri = mutableStateOf<Uri?>(null)
 
+    /**
+     * Bumped on every ACTION_VIEW so re-opening the SAME file (which lands
+     * here via documentLaunchMode=intoExisting -> onNewIntent) re-triggers
+     * the load effect; the Uri itself does not change.
+     */
+    private val viewRequest = mutableStateOf(0)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         viewUri.value = extractViewUri(intent)
-        setContent { MathMdApp(externalUri = viewUri.value) }
+        if (viewUri.value != null) viewRequest.value++
+        setContent { MathMdApp(externalUri = viewUri.value, viewRequest = viewRequest.value) }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         viewUri.value = extractViewUri(intent)
+        viewRequest.value++
     }
 
     private fun extractViewUri(intent: Intent?): Uri? =
@@ -73,6 +84,11 @@ class MainActivity : ComponentActivity() {
 
 /** Editing modes: source editor and rendered preview. */
 private enum class Mode { Edit, Preview }
+
+/** MIME types offered by the Open document picker. */
+private val OPEN_MIMES = arrayOf(
+    "text/markdown", "text/x-markdown", "text/plain", "application/octet-stream",
+)
 
 /** Current backing document. */
 private class DocState {
@@ -88,7 +104,7 @@ private fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode
 }
 
 @Composable
-private fun MathMdApp(externalUri: Uri?) {
+private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
 
@@ -114,7 +130,16 @@ private fun MathMdApp(externalUri: Uri?) {
     val doc = remember { DocState() }
     val dirty = text != doc.savedText
 
+    // Open-button guard flow: dirty buffer -> dialog FIRST, then the picker.
+    var showOpenGuard by rememberSaveable { mutableStateOf(false) }
+    var openInNewWindow by remember { mutableStateOf(false) }
+    var pendingOpenAfterSave by remember { mutableStateOf(false) }
+
     val resolver = context.contentResolver
+    // Single-threaded IO: quick successive opens complete in order
+    // (last-writer-wins is the wanted semantics; raw threads raced).
+    val io = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
+    androidx.compose.runtime.DisposableEffect(io) { onDispose { io.shutdown() } }
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     fun onUi(block: () -> Unit) {
         mainHandler.post(block)
@@ -131,7 +156,7 @@ private fun MathMdApp(externalUri: Uri?) {
         } ?: "untitled.md"
 
     fun loadFromUri(uri: Uri) {
-        Thread {
+        io.execute {
             try {
                 val content = resolver.openInputStream(uri)?.use {
                     it.readBytes().toString(Charsets.UTF_8)
@@ -157,11 +182,17 @@ private fun MathMdApp(externalUri: Uri?) {
             } catch (e: Exception) {
                 onUi { toast("Open failed: ${e.message}") }
             }
-        }.start()
+        }
     }
 
+    /**
+     * Async write. [content] is the snapshot to persist; [onOk] runs on the
+     * UI thread after a successful write. NOTE: "wt" truncates before
+     * writing — a mid-write provider failure leaves the file emptied
+     * (accepted: SAF offers no atomic replace; retry restores content).
+     */
     fun writeTo(uri: Uri, content: String, onOk: () -> Unit) {
-        Thread {
+        io.execute {
             try {
                 resolver.openOutputStream(uri, "wt")?.use {
                     it.write(content.toByteArray(Charsets.UTF_8))
@@ -172,12 +203,36 @@ private fun MathMdApp(externalUri: Uri?) {
             } catch (e: Exception) {
                 onUi { toast("Save failed: ${e.message}") }
             }
-        }.start()
+        }
     }
 
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> if (uri != null) loadFromUri(uri) }
+    ) { uri ->
+        if (uri != null) {
+            if (openInNewWindow) {
+                // "Keep this instance, open in a new window": re-enter the app
+                // via ACTION_VIEW — documentLaunchMode gives the file its own
+                // instance (or focuses the one already showing it).
+                openInNewWindow = false
+                val view = Intent(Intent.ACTION_VIEW, uri).apply {
+                    setPackage(context.packageName)
+                    addFlags(
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                    )
+                }
+                try {
+                    context.startActivity(view)
+                } catch (e: Exception) {
+                    toast("Could not open a new window: ${e.message}")
+                    loadFromUri(uri) // fallback: open in this instance
+                }
+            } else {
+                loadFromUri(uri)
+            }
+        }
+    }
 
     // CreateDocument serves both first-time Save on an untitled buffer and
     // Save as…: in both cases the picked location becomes the document this
@@ -186,26 +241,58 @@ private fun MathMdApp(externalUri: Uri?) {
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
         if (uri != null) {
-            doc.uri = uri
-            doc.name = displayName(uri)
-            writeTo(uri, text) { doc.savedText = text }
+            val snapshot = text
+            io.execute {
+                val name = displayName(uri)
+                onUi {
+                    doc.uri = uri
+                    doc.name = name
+                    val reopenPicker = pendingOpenAfterSave
+                    pendingOpenAfterSave = false
+                    writeTo(uri, snapshot) {
+                        doc.savedText = snapshot
+                        if (reopenPicker) openLauncher.launch(OPEN_MIMES)
+                    }
+                }
+            }
         }
     }
 
     fun save() {
         val uri = doc.uri
+        val snapshot = text // pin NOW: keystrokes during the async write stay dirty
         if (uri == null) {
             createLauncher.launch(doc.name)
         } else {
-            writeTo(uri, text) {
-                doc.savedText = text
+            writeTo(uri, snapshot) {
+                doc.savedText = snapshot
                 toast("Saved")
             }
         }
     }
 
-    // Documents opened from outside the app: honor the startup-mode preference.
-    LaunchedEffect(externalUri) {
+    /** Save, then continue into the file picker (Open-guard path). */
+    fun saveThenOpen() {
+        val uri = doc.uri
+        val snapshot = text
+        if (uri == null) {
+            // Untitled + dirty: Save As first; picker follows once it lands.
+            pendingOpenAfterSave = true
+            createLauncher.launch(doc.name)
+        } else {
+            writeTo(uri, snapshot) {
+                doc.savedText = snapshot
+                toast("Saved")
+                openLauncher.launch(OPEN_MIMES)
+            }
+        }
+    }
+
+    // Documents opened from outside the app: honor the startup-mode
+    // preference. With documentLaunchMode=intoExisting each file gets its
+    // own instance; re-shooting the same file lands here via onNewIntent
+    // with a bumped viewRequest, so the reload still happens.
+    LaunchedEffect(externalUri, viewRequest) {
         if (externalUri != null) {
             mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
             loadFromUri(externalUri)
@@ -238,7 +325,10 @@ private fun MathMdApp(externalUri: Uri?) {
                                 text = { Text("Open") },
                                 onClick = {
                                     menuOpen = false
-                                    openLauncher.launch(arrayOf("text/markdown", "text/x-markdown", "text/plain", "application/octet-stream"))
+                                    // Dirty buffer: ask FIRST (save / discard /
+                                    // new window), then show the picker.
+                                    if (dirty) showOpenGuard = true
+                                    else openLauncher.launch(OPEN_MIMES)
                                 },
                             )
                             DropdownMenuItem(
@@ -291,6 +381,46 @@ private fun MathMdApp(externalUri: Uri?) {
                     }
                 }
             }
+        }
+
+        if (showOpenGuard) {
+            AlertDialog(
+                onDismissRequest = { showOpenGuard = false },
+                title = { Text("Unsaved changes") },
+                confirmButton = {},
+                dismissButton = {},
+                text = {
+                    Column {
+                        Text("Unsaved changes in ${doc.name}.")
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                showOpenGuard = false
+                                saveThenOpen()
+                            },
+                        ) { Text("Save and open…", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                showOpenGuard = false
+                                openLauncher.launch(OPEN_MIMES) // discard: this buffer is replaced
+                            },
+                        ) { Text("Discard changes and open…", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = {
+                                showOpenGuard = false
+                                openInNewWindow = true
+                                openLauncher.launch(OPEN_MIMES)
+                            },
+                        ) { Text("Keep this, open in new window…", modifier = Modifier.fillMaxWidth()) }
+                        TextButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { showOpenGuard = false },
+                        ) { Text("Cancel", modifier = Modifier.fillMaxWidth()) }
+                    }
+                },
+            )
         }
 
         if (showSettings) {

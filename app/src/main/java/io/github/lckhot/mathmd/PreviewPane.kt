@@ -15,7 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
 import org.json.JSONObject
 
-/** Per-WebView state across recompositions. */
+/** Per-WebView render state; survives WebView recreation (settings reload)
+ *  so the document queued before page load is not lost. */
 private class PreviewState {
     var ready: Boolean = false
     var latestMarkdown: String = ""
@@ -57,9 +58,18 @@ internal fun PreviewPane(
     key(reloadKey) {
         AndroidView(
             modifier = modifier.fillMaxWidth(),
+            onRelease = { view ->
+                // Full teardown: without destroy() the page + JS interface
+                // leak on every reload/dispose.
+                view.stopLoading()
+                view.destroy()
+            },
             factory = { ctx ->
                 WebView(ctx).apply {
                     tag = state
+                    // A fresh page is not ready until onPageFinished says so
+                    // (stale true would inject into a half-loaded document).
+                    state.ready = false
                     // Transparent so the theme-colored surface shows until first paint.
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     settings.javaScriptEnabled = true
@@ -93,7 +103,15 @@ internal fun PreviewPane(
                         ): Boolean {
                             val url = request.url
                             if (url.scheme == "http" || url.scheme == "https") {
-                                ctx.startActivity(Intent(Intent.ACTION_VIEW, url))
+                                // No browser installed (or no handler) must not
+                                // crash the app.
+                                try {
+                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, url))
+                                } catch (_: android.content.ActivityNotFoundException) {
+                                    android.widget.Toast.makeText(
+                                        ctx, "No app can open this link", android.widget.Toast.LENGTH_SHORT,
+                                    ).show()
+                                }
                             }
                             return true
                         }
@@ -132,6 +150,14 @@ private fun previewOptionsJson(appDark: Boolean, fontName: String): String {
 
 /** Send markdown + options to the page; strings quoted via org.json. */
 private fun pushDocument(view: WebView, markdown: String, optionsJson: String) {
-    val js = "MathMD.hostUpdate(${JSONObject.quote(markdown)}, $optionsJson)"
-    view.evaluateJavascript(js, null)
+    // Wrapped in a JS try/catch: a missing/late bundle throws, and the
+    // callback can then tell success ("ok") from failure (our marker
+    // string) — the fail-visible principle applies to the bridge too.
+    val js = "try { MathMD.hostUpdate(${JSONObject.quote(markdown)}, $optionsJson); 'ok' } " +
+        "catch (e) { 'MATHMD-BRIDGE-ERR: ' + (e && e.message ? e.message : String(e)) }"
+    view.evaluateJavascript(js) { result ->
+        if (result != null && result.contains("MATHMD-BRIDGE-ERR")) {
+            android.util.Log.e("MathMD", "preview bridge failure: $result")
+        }
+    }
 }
