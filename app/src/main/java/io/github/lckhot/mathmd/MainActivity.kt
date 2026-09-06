@@ -96,6 +96,7 @@ private fun MathMdApp(externalUri: Uri?) {
     var editorFontSize by remember { mutableStateOf(settings.editorFontSize) }
     var editorFont by remember { mutableStateOf(settings.editorFont) }
     var previewFont by remember { mutableStateOf(settings.previewFont) }
+    var pageWidthCh by remember { mutableStateOf(settings.pageWidthCh) }
     var startupMode by remember { mutableStateOf(settings.startupMode) }
 
     // Mode has no ordering: back always exits the app, never switches mode.
@@ -267,7 +268,7 @@ private fun MathMdApp(externalUri: Uri?) {
                 // reload flash); Edit mode covers it with an opaque surface.
                 Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                     PreviewPane(
-                        text, appDark, previewFont,
+                        text, appDark, previewFont, pageWidthCh,
                         visible = mode == Mode.Preview,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -292,10 +293,12 @@ private fun MathMdApp(externalUri: Uri?) {
                 editorFontSize = editorFontSize,
                 editorFont = editorFont,
                 previewFont = previewFont,
+                pageWidthCh = pageWidthCh,
                 onTheme = { themeMode = it; settings.theme = it },
                 onEditorSize = { editorFontSize = it; settings.editorFontSize = it },
                 onEditorFont = { editorFont = it; settings.editorFont = it },
                 onPreviewFont = { previewFont = it; settings.previewFont = it },
+                onPageWidth = { pageWidthCh = it; settings.pageWidthCh = it },
                 startupMode = startupMode,
                 onStartupMode = { startupMode = it; settings.startupMode = it },
                 onDismiss = { showSettings = false },

@@ -259,6 +259,57 @@
     if (typeof o.fontFamily === "string" && o.fontFamily.length > 0) {
       root.style.setProperty("--preview-font-family", o.fontFamily);
     }
+    applyPageWidth(o.pageWidthCh, typeof o.fontFamily === "string" ? o.fontFamily : "");
+  }
+  var DEFAULT_VIEWPORT = "width=device-width, initial-scale=1";
+  var lastWidthKey = null;
+  function applyPageWidth(ch, fontFamily) {
+    const root = document.documentElement;
+    if (typeof ch !== "number" || ch <= 0) {
+      root.style.removeProperty?.("--page-width");
+      setViewportMeta(DEFAULT_VIEWPORT);
+      lastWidthKey = null;
+      return;
+    }
+    root.style.setProperty("--page-width", `${ch}ch`);
+    const key = `${ch}|${fontFamily}`;
+    if (key === lastWidthKey) return;
+    const doc = globalThis.document;
+    const host = document.getElementById("preview") ?? document.body;
+    if (typeof doc.createElement !== "function" || !host || typeof host.appendChild !== "function") {
+      return;
+    }
+    const probe = doc.createElement("span");
+    probe.style.cssText = "display:block;width:100ch;height:0;overflow:hidden;position:absolute;top:0;left:0";
+    host.appendChild(probe);
+    const chPx = probe.getBoundingClientRect().width / 100;
+    probe.remove();
+    if (chPx > 0) {
+      setViewportMeta(`width=${Math.round(ch * chPx) + 32}px`);
+      lastWidthKey = key;
+    }
+  }
+  function setViewportMeta(content) {
+    const doc = globalThis.document;
+    if (typeof doc.querySelector !== "function") return;
+    const meta = doc.querySelector('meta[name="viewport"]');
+    if (meta) meta.setAttribute("content", content);
+  }
+  function postRender(root) {
+    if (typeof root.querySelectorAll !== "function") return;
+    for (const display of Array.from(root.querySelectorAll(".katex-display"))) {
+      const d = display;
+      const tag = d.querySelector(".katex-tag");
+      let scroller = d;
+      if (tag) {
+        d.classList.add("tagged");
+        d.appendChild(tag);
+        scroller = d.querySelector(":scope > .katex") ?? d;
+      }
+      if (scroller.scrollWidth > scroller.clientWidth + 1) {
+        d.classList.add("wide");
+      }
+    }
   }
   function hostUpdate(markdown, opts) {
     const target = document.getElementById("preview");
@@ -267,6 +318,7 @@
       if (opts) applyHostOptions(opts);
       const result = renderMarkdown(markdown);
       target.innerHTML = result.html;
+      postRender(target);
       if (result.errors.length > 0) {
         const bad = result.errors.map((e) => `${e.message}`).join("\n");
         console.warn(`MathMD: ${result.errors.length} formula(s) failed: ${bad}`);

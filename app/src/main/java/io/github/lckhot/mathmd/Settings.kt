@@ -22,6 +22,11 @@ internal class Settings(context: Context) {
         get() = prefs.getString("previewFont", "default") ?: "default"
         set(v) = prefs.edit().putString("previewFont", v).apply()
 
+    /** Fixed content column width in `ch` units; 0 = fill the viewport. */
+    var pageWidthCh: Int
+        get() = prefs.getInt("pageWidthCh", 0)
+        set(v) = prefs.edit().putInt("pageWidthCh", v).apply()
+
     /** Mode shown at launch: "edit" or "preview". */
     var startupMode: String
         get() = prefs.getString("startupMode", "edit") ?: "edit"

@@ -36,6 +36,14 @@ html, body {
   overflow-wrap: break-word;
 }
 
+/* Fixed content column (user setting): the page lays out at this width and
+ * stays there — pinch-zoom then scales the whole page uniformly instead of
+ * re-flowing text. Auto margins keep the column centered. */
+#preview {
+  max-width: var(--page-width, 100%);
+  margin-inline: auto;
+}
+
 h1, h2, h3, h4 { line-height: 1.25; margin: 1.2em 0 0.5em; }
 
 a { color: var(--link); }
@@ -72,36 +80,46 @@ th, td { border: 1px solid var(--border); padding: 4px 8px; }
 }
 
 /*
- * Equation tags (\tag): KaTeX positions .katex-tag absolutely at the right
- * edge of the (full-width) .katex-html box, so for formulas wider than the
- * viewport the tag overlaps the formula tail and scrolls with the content,
- * detached from what it labels. Pull the tag into the inline flow as a
- * sticky element instead:
- *  - short formula: tag sits right after the formula's end (baseline-aligned
- *    with the last line) — also correct inside multi-line environments
- *    (aligned/aligned/cases), where the flow position is the last line;
- *  - formula wider than the viewport: the tag stays pinned to the visible
- *    right edge while scrolling and lands after the formula's end once
- *    fully scrolled (LaTeX-like margin-tag behavior).
- * The opaque background keeps it legible when it overlaps formula ink
- * during an intermediate scroll position.
+ * Equation tags (\tag). After render, host.ts relocates .katex-tag out of
+ * the scrolling content box (.katex-html) to be a direct child of
+ * .katex-display.tagged. Layout then is a flex row:
+ *   [ .katex = formula viewport (flex:1, scrolls) | label (fixed width) ]
+ * - the label sits at the RIGHT END OF THE LINE (the fixed page column),
+ *   independent of the formula;
+ * - a formula wider than the line scrolls horizontally inside its own
+ *   viewport (touch-drag left/right) while the label stays put;
+ * - the flex row gives the viewport only (line width - label width), so
+ *   when the formula is scrolled to its very end, its last glyph stops at
+ *   the viewport edge, 0.5em clear of the label — ZERO overlap is
+ *   guaranteed by construction, not by luck.
+ * Without the relocation (plain KaTeX output) the old absolute right:0 pin
+ * from katex.min.css still applies.
  */
-.katex-display > .katex > .katex-html > .katex-tag {
-  position: sticky;
-  right: 0;
-  display: inline-block;
-  vertical-align: baseline;
-  margin-left: 1em;
-  padding-left: 0.25em;
-  background: var(--bg);
+.katex-display.tagged {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5em;
+}
+.katex-display.tagged > .katex {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.katex-display.tagged > .katex-tag {
+  position: static;
+  flex: 0 0 auto;
+  line-height: 1.2;
+  text-align: right;
 }
 
-/* leqno (tag on the left): mirror the same treatment. */
-.katex-display.leqno > .katex > .katex-html > .katex-tag {
-  left: 0;
-  margin-left: 0;
-  margin-right: 1em;
-  padding-right: 0.25em;
+/* KaTeX centers display content; a centered formula wider than its box
+ * spills left AND right, and the left spill is unreachable by scrolling.
+ * host.ts flags such lines (.wide) — left-align them so all content is
+ * reachable in the scroll viewport. */
+.katex-display.wide > .katex,
+.katex-display.wide > .katex > .katex-html {
+  text-align: left;
 }
 
 .math-error {

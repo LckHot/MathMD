@@ -24,6 +24,7 @@ internal fun PreviewPane(
     source: String,
     appDark: Boolean,
     fontName: String,
+    pageWidthCh: Int,
     visible: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -40,6 +41,11 @@ internal fun PreviewPane(
                 settings.allowFileAccess = false
                 settings.allowContentAccess = false
                 settings.blockNetworkLoads = true
+                // Honor the <meta viewport> tag so the page-width setting
+                // (fixed layout viewport in CSS px) takes effect; pinch-zoom
+                // then scales the whole page uniformly without re-flowing.
+                settings.useWideViewPort = true
+                settings.loadWithOverviewMode = true
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String) {
                         val st = view.tag as PreviewState
@@ -63,7 +69,7 @@ internal fun PreviewPane(
         },
         update = { view ->
             val st = view.tag as PreviewState
-            val options = previewOptionsJson(appDark, fontName)
+            val options = previewOptionsJson(appDark, fontName, pageWidthCh)
             st.latestMarkdown = source
             st.latestOptions = options
             if (st.ready && visible) pushDocument(view, source, options)
@@ -82,10 +88,11 @@ private fun cssFontFamily(name: String): String? = when (name) {
 }
 
 /** JSON options object passed to MathMD.hostUpdate. */
-private fun previewOptionsJson(appDark: Boolean, fontName: String): String {
+private fun previewOptionsJson(appDark: Boolean, fontName: String, pageWidthCh: Int): String {
     val o = JSONObject()
         .put("theme", if (appDark) "dark" else "light")
     cssFontFamily(fontName)?.let { o.put("fontFamily", it) }
+    if (pageWidthCh > 0) o.put("pageWidthCh", pageWidthCh)
     return o.toString()
 }
 

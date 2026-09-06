@@ -43,10 +43,12 @@ internal fun SettingsDialog(
     editorFontSize: Int,
     editorFont: String,
     previewFont: String,
+    pageWidthCh: Int,
     onTheme: (String) -> Unit,
     onEditorSize: (Int) -> Unit,
     onEditorFont: (String) -> Unit,
     onPreviewFont: (String) -> Unit,
+    onPageWidth: (Int) -> Unit,
     onStartupMode: (String) -> Unit,
     startupMode: String,
     onDismiss: () -> Unit,
@@ -78,7 +80,7 @@ internal fun SettingsDialog(
                     }
                 }
                 SettingRow("Editor font size (8–40)") {
-                    SizeField(editorFontSize, onEditorSize)
+                    SizeField(editorFontSize, onEditorSize, min = 8, max = 40)
                 }
                 SettingRow("Editor font") {
                     PickerField(
@@ -96,20 +98,24 @@ internal fun SettingsDialog(
                         onPick = onPreviewFont,
                     )
                 }
+                SettingRow("Page width in characters (0 = fill screen)") {
+                    SizeField(pageWidthCh, onPageWidth, min = 0, max = 200)
+                }
             }
         },
     )
 }
 
 @Composable
-private fun SizeField(value: Int, onChange: (Int) -> Unit) {
+private fun SizeField(value: Int, onChange: (Int) -> Unit, min: Int, max: Int) {
+    val maxDigits = max.toString().length
     var txt by remember(value) { mutableStateOf(value.toString()) }
     OutlinedTextField(
         value = txt,
         onValueChange = { s ->
-            val filtered = s.filter { it.isDigit() }.take(2)
+            val filtered = s.filter { it.isDigit() }.take(maxDigits)
             txt = filtered
-            filtered.toIntOrNull()?.let { if (it in 8..40) onChange(it) }
+            filtered.toIntOrNull()?.let { if (it in min..max) onChange(it) }
         },
         modifier = Modifier.width(120.dp),
         singleLine = true,

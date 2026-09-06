@@ -34,12 +34,20 @@ execSync(
 // Minimal DOM stub: the bundle registers a DOMContentLoaded hook and looks up
 // #preview at render time; tests drive hostUpdate through this stub.
 const previewEl = { innerHTML: '', childElementCount: 0 };
+const styleProps = {};
 const doc = {
   addEventListener() {},
   getElementById: (id) => (id === 'preview' ? previewEl : null),
-  documentElement: { dataset: {}, style: { setProperty() {} } },
+  documentElement: {
+    dataset: {},
+    style: {
+      setProperty(k, v) { styleProps[k] = v; },
+      removeProperty(k) { delete styleProps[k]; },
+    },
+  },
 };
 const ctx = { console, setTimeout, clearTimeout, atob, btoa, document: doc, matchMedia: () => ({ matches: false }) };
+ctx.window = ctx; // real browsers alias window === globalThis
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(ASSETS, 'markdown-it.umd.min.js'), 'utf8'), ctx, { filename: 'markdown-it.umd.min.js' });
@@ -215,6 +223,17 @@ const DISP = 'katex-display';
   const iBase = html.indexOf('katex-base');
   const iTag = html.indexOf('katex-tag');
   check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
+}
+
+// 11. Page-width option drives the --page-width CSS var (the viewport-meta
+//     rewrite it also performs is a real-DOM concern, guarded off in the node
+//     stub; the CSS var is what the test harness can pin).
+{
+  previewEl.innerHTML = '';
+  ctx.MathMD.hostUpdate('x', { pageWidthCh: 40 });
+  check('pageWidthCh sets --page-width', styleProps['--page-width'] === '40ch', JSON.stringify(styleProps));
+  ctx.MathMD.hostUpdate('x', { pageWidthCh: 0 });
+  check('pageWidthCh 0 clears --page-width', !('--page-width' in styleProps), JSON.stringify(styleProps));
 }
 
 // ---- report ----
