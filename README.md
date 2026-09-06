@@ -39,7 +39,10 @@ spans/fences that must stay literal).
 ## Known trade-off: dollar signs
 
 There is deliberately no currency special-casing. **Every unescaped `$`
-interacts with the math pass.** 
+interacts with the math pass:** two unescaped `$` pair into a formula no
+matter what sits between them (`I have $12 and he have $23` renders
+`12 and he have` as math), and only a lone `$` with no partner stays
+literal.
 **All dedicated dollar signs must therefore be written escaped (`\$`) or
 inside code spans** — a literal `$` is never safe.
 
