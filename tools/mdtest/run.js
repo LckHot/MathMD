@@ -239,6 +239,12 @@ const DISP = 'katex-display';
     'boot script contract changed',
   );
   check(
+    'boot script pins fit scale via initial/minimum-scale (owner zoom model)',
+    html.includes('initial-scale=') && html.includes('minimum-scale=') &&
+      html.includes('maximum-scale=10'),
+    'viewport scale contract changed',
+  );
+  check(
     'boot script runs before stylesheets',
     html.indexOf('MathMDNative') < html.indexOf('katex.min.css'),
     'viewport must be locked before first layout',

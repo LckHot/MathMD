@@ -18,6 +18,7 @@
     // standard desktop-browser logic for a fixed-width page. Over-wide
     // formulas keep their own inner scrollers regardless (see preview.css).
     (function () {
+      var meta = document.querySelector('meta[name="viewport"]');
       var chars = 0, family = '';
       try {
         if (window.MathMDNative) {
@@ -29,7 +30,13 @@
           }
         }
       } catch (e) { /* keep defaults: fill screen */ }
-      if (chars <= 0) return;
+      if (chars <= 0) {
+        // Fill mode: device width, pinch between 1x and 10x (no zoom-out
+        // past the screen — there is nothing to see beyond it).
+        meta.setAttribute('content',
+          'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=10');
+        return;
+      }
       // Measure 1ch with a probe BEFORE any stylesheet applies, using the
       // exact font the preview will render in (16px is the CSS default size;
       // preview.css keeps #preview at that default).
@@ -40,12 +47,25 @@
       document.documentElement.appendChild(probe);
       var chPx = probe.getBoundingClientRect().width / 100;
       probe.remove();
-      if (chPx > 0) {
-        // 32px = #preview horizontal padding (16px each side)
-        var width = Math.round(chars * chPx) + 32;
-        document.querySelector('meta[name="viewport"]')
-          .setAttribute('content', 'width=' + width);
-      }
+      if (chPx <= 0) return;
+      // 32px = #preview horizontal padding (16px each side)
+      var pageW = Math.round(chars * chPx) + 32;
+      // Device width in CSS px: the meta still says device-width here, so
+      // innerWidth is exactly the screen width at scale 1.
+      var deviceW = window.innerWidth;
+      if (deviceW <= 0) return;
+      // Explicit fit scale. WebView's overview mode only ever zooms a page
+      // OUT, so a line narrower than the screen must ask for its zoom-IN
+      // scale itself (Blink honors initial-scale > 1 — verified).
+      // minimum-scale = fit: "line width fills the screen" is the smallest
+      // zoom, with no horizontal panning at that level; pinching out past
+      // fit scales the fixed page and reveals global horizontal panning.
+      var fit = Math.round(deviceW / pageW * 10000) / 10000;
+      meta.setAttribute('content',
+        'width=' + pageW +
+        ', initial-scale=' + fit +
+        ', minimum-scale=' + fit +
+        ', maximum-scale=10');
     })();
   </script>
   <link rel="stylesheet" href="katex/katex.min.css">

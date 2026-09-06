@@ -67,13 +67,18 @@ internal fun PreviewPane(
                     settings.allowFileAccess = false
                     settings.allowContentAccess = false
                     settings.blockNetworkLoads = true
-                    // Honor the <meta viewport> tag: the boot script locks the
-                    // layout viewport to the configured line width; overview
-                    // mode then fits that width to the screen as the default
-                    // (minimum) zoom, and pinch scales the fixed page without
-                    // re-flow.
+                    // Honor the <meta viewport> tag: the boot script locks
+                    // the layout viewport to the configured line width and
+                    // sets initial/minimum scale so that width exactly fills
+                    // the screen (the minimum zoom, no panning); pinch-out
+                    // scales the fixed page and reveals global panning.
                     settings.useWideViewPort = true
-                    settings.loadWithOverviewMode = true
+                    // Pinch-zoom is OFF by default in WebView — the gesture
+                    // needs builtInZoomControls; only the +/- widgets are
+                    // suppressed. (Owner bug report: pinch did nothing.)
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
+                    settings.setSupportZoom(true)
                     addJavascriptInterface(PreviewBridge(appSettings), "MathMDNative")
                     webViewClient = object : WebViewClient() {
                         override fun onPageFinished(view: WebView, url: String) {
