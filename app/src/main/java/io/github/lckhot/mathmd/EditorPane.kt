@@ -56,18 +56,34 @@ internal fun EditorPane(
 ) {
     val state = remember { TextFieldState(text) }
 
-    // External text changes (open a file) sync in; local edits flow out.
-    if (state.text.toString() != text) {
-        state.edit { replace(0, length, text) }
-    }
+    // Echo-guarded external sync (blind-audit MEDIUM): writing the
+    // TextFieldState DURING composition is an anti-pattern that can swallow
+    // a keystroke / IME composition in flight (a recomposition landing
+    // between the edit and the snapshotFlow echo would replace the buffer
+    // with the stale parent value). Our own keystrokes travel
+    // state -> snapshotFlow -> parent -> back here, so only a text that did
+    // NOT come from this field (open/reload) may replace the buffer.
+    var lastEmitted by remember { mutableStateOf(text) }
     LaunchedEffect(state) {
-        snapshotFlow { state.text.toString() }.collect { onText(it) }
+        snapshotFlow { state.text.toString() }.collect {
+            lastEmitted = it
+            onText(it)
+        }
+    }
+    LaunchedEffect(text) {
+        if (text != lastEmitted && text != state.text.toString()) {
+            state.edit { replace(0, length, text) }
+        }
     }
 
-    // Recomputed each recomposition (cheap indexOf scan; text sizes here
-    // are documents, not novels).
+    // Match scan memoized on (text, query): the old per-recomposition scan
+    // rebuilt the lowercase copy and the Range list on EVERY frame and made
+    // remember(ranges, active) below useless — the same cache the preview
+    // side built for its find index. Content-equal String keys, so edits
+    // and query changes still recompute exactly once.
     val query = search?.query.orEmpty()
-    val ranges = matchRanges(state.text.toString(), query)
+    val currentText = state.text.toString()
+    val ranges = remember(currentText, query) { matchRanges(currentText, query) }
     val active = if (search == null || ranges.isEmpty()) -1
     else search.index.coerceIn(0, ranges.lastIndex)
 
