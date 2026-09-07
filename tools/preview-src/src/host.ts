@@ -166,15 +166,36 @@ function paint(ranges: Range[], active: number): void {
   if (ranges[active]) sel?.addRange(ranges[active]);
 }
 
-/** Scroll `range` into view through ALL nested scrollers via a marker. */
+/**
+ * Scroll `range` into view WITHOUT mutating the DOM. The old marker-span
+ * trick dirtied the tree twice per jump (insert + remove), and each
+ * mutation forced a full style/layout pass over the KaTeX-heavy page —
+ * that was the visible jump lag while stepping/typing. getBoundingClientRect
+ * forces layout only when the tree is already dirty, and highlight painting
+ * (CSS Custom Highlight) never dirties it, so repeat jumps cost ~nothing.
+ */
 function scrollToRange(range: Range): void {
-  const marker = document.createElement('span');
-  marker.style.cssText = 'display:inline;width:0;height:0';
-  const r = range.cloneRange();
-  r.collapse(true);
-  r.insertNode(marker);
-  marker.scrollIntoView({ block: 'center', inline: 'center' });
-  marker.remove();
+  // Center the match inside any nested overflow-x scroller that clips it
+  // (wide formulas, .table-scroll) — window.scrollTo alone can't reach
+  // content hidden inside a nested scroller.
+  let el: Element | null =
+    range.startContainer.nodeType === 1
+      ? (range.startContainer as Element)
+      : range.startContainer.parentElement;
+  while (el !== null && el !== document.body) {
+    if (el.scrollWidth > el.clientWidth + 1) {
+      const er = el.getBoundingClientRect();
+      const r = range.getBoundingClientRect();
+      if (r.left < er.left || r.right > er.right) {
+        el.scrollLeft += r.left - er.left - (el.clientWidth - r.width) / 2;
+      }
+    }
+    el = el.parentElement;
+  }
+  const rect = range.getBoundingClientRect();
+  const top = window.scrollY + rect.top - (window.innerHeight - rect.height) / 2;
+  const left = window.scrollX + rect.left - (window.innerWidth - rect.width) / 2;
+  window.scrollTo(Math.max(0, left), Math.max(0, top)); // instant (no CSS smooth)
 }
 
 export function find(query: string, active: number): FindResult {

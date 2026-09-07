@@ -536,13 +536,21 @@
     if (ranges[active]) sel?.addRange(ranges[active]);
   }
   function scrollToRange(range) {
-    const marker = document.createElement("span");
-    marker.style.cssText = "display:inline;width:0;height:0";
-    const r = range.cloneRange();
-    r.collapse(true);
-    r.insertNode(marker);
-    marker.scrollIntoView({ block: "center", inline: "center" });
-    marker.remove();
+    let el = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+    while (el !== null && el !== document.body) {
+      if (el.scrollWidth > el.clientWidth + 1) {
+        const er = el.getBoundingClientRect();
+        const r = range.getBoundingClientRect();
+        if (r.left < er.left || r.right > er.right) {
+          el.scrollLeft += r.left - er.left - (el.clientWidth - r.width) / 2;
+        }
+      }
+      el = el.parentElement;
+    }
+    const rect = range.getBoundingClientRect();
+    const top = window.scrollY + rect.top - (window.innerHeight - rect.height) / 2;
+    const left = window.scrollX + rect.left - (window.innerWidth - rect.width) / 2;
+    window.scrollTo(Math.max(0, left), Math.max(0, top));
   }
   function find(query, active) {
     const target = document.getElementById("preview");
