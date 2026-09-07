@@ -107,6 +107,12 @@ function randomSalt(): string {
  * skipped: it duplicates every formula's text invisibly and would
  * double-count. Matching state is cached per document (see below);
  * hostUpdate invalidates it.
+ *
+ * CONTRACT with the editor pane (kept in SearchBar.kt's SearchSpec doc):
+ * this searches RENDERED text, one Text node at a time — phrases spanning
+ * element boundaries never match — while the editor searches the flat
+ * markdown source; totals can legitimately differ. `active` is CLAMPED,
+ * never wrapped.
  */
 export interface FindResult {
   total: number;
@@ -272,7 +278,9 @@ export function find(query: string, active: number): FindResult {
     clearFind();
     return { total: 0, active: -1 };
   }
-  const idx = active >= 0 && active < ranges.length ? active : 0;
+  // CLAMP (shared contract with the editor pane): out-of-range indexes pin
+  // to the nearest valid hit; the Kotlin side does the same via coerceIn.
+  const idx = active < 0 ? 0 : Math.min(active, ranges.length - 1);
   paint(ranges, idx);
   scrollToRange(ranges[idx]);
   return { total: ranges.length, active: idx };

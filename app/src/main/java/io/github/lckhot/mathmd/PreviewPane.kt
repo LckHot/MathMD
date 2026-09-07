@@ -51,7 +51,7 @@ internal fun PreviewPane(
     reloadKey: Any,
     appSettings: Settings,
     visible: Boolean,
-    search: PreviewSearchSpec? = null,
+    search: SearchSpec? = null,
     modifier: Modifier = Modifier,
 ) {
     val state = remember { PreviewState() }

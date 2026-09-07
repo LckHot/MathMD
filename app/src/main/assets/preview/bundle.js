@@ -605,7 +605,7 @@
       clearFind();
       return { total: 0, active: -1 };
     }
-    const idx = active >= 0 && active < ranges.length ? active : 0;
+    const idx = active < 0 ? 0 : Math.min(active, ranges.length - 1);
     paint(ranges, idx);
     scrollToRange(ranges[idx]);
     return { total: ranges.length, active: idx };

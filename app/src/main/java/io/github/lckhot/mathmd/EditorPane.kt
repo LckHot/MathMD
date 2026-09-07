@@ -23,26 +23,6 @@ import androidx.compose.ui.unit.sp
 import android.graphics.Typeface
 import kotlin.math.roundToInt
 
-/**
- * Search state handed to the editor pane. [tick] bumps on every
- * (re)run-request (query change, step, mode flip); the pane recomputes
- * matches from its own text and reports back via [onResult].
- */
-internal class EditorSearchSpec(
-    val query: String,
-    val index: Int,
-    val tick: Int,
-    val onResult: (total: Int, active: Int) -> Unit,
-)
-
-/** Same contract for the preview pane (runs through the JS bridge). */
-internal class PreviewSearchSpec(
-    val query: String,
-    val index: Int,
-    val tick: Int,
-    val onResult: (total: Int, active: Int) -> Unit,
-)
-
 private val HitAll = SpanStyle(background = Color(0x59FFC800)) // amber ~35%
 private val HitActive = SpanStyle(background = Color(0xE6FF6E00)) // orange
 
@@ -71,7 +51,7 @@ internal fun EditorPane(
     fontSize: Int,
     fontName: String,
     modifier: Modifier = Modifier,
-    search: EditorSearchSpec? = null,
+    search: SearchSpec? = null,
     onText: (String) -> Unit,
 ) {
     val state = remember { TextFieldState(text) }

@@ -21,6 +21,30 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
+ * Search contract handed to EITHER pane (merged from the former identical
+ * EditorSearchSpec/PreviewSearchSpec pair — two copies of one contract
+ * invite silent drift). [tick] bumps on every (re)run-request (query
+ * change, step, mode flip); the pane recomputes matches from its own text
+ * and reports back via [onResult].
+ *
+ * SEMANTIC CONTRACT — the panes share the cursor/count but search
+ * DIFFERENT texts:
+ *  - Editor: matches the markdown SOURCE (raw TeX included; phrases match
+ *    across inline formatting since the source is flat).
+ *  - Preview: matches RENDERED text, one DOM Text node at a time — a
+ *    phrase spanning <em>/<strong>/formula boundaries never matches, and
+ *    `.katex-mathml` is excluded (it invisibly duplicates formula text).
+ *  Totals can therefore legitimately differ between modes for the same
+ *  query. An out-of-range [index] is CLAMPED by both panes (never wraps).
+ */
+internal class SearchSpec(
+    val query: String,
+    val index: Int,
+    val tick: Int,
+    val onResult: (total: Int, active: Int) -> Unit,
+)
+
+/**
  * Search bar under the top bar (both modes). The owning screen routes the
  * query to whichever pane is visible; `result` is (total, activeIndex) as
  * reported by that pane.

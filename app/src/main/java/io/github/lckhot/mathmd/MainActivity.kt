@@ -272,7 +272,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
 
     // One search spec always live; query collapses to "" when the bar is
     // closed so either pane clears its highlights on the final run.
-    val editorSearch = EditorSearchSpec(
+    val editorSearch = SearchSpec(
         query = if (searchOpen) searchQuery else "",
         index = searchIndex,
         tick = searchTick,
@@ -281,7 +281,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
             searchIndex = active.coerceAtLeast(0)
         },
     )
-    val previewSearch = PreviewSearchSpec(
+    val previewSearch = SearchSpec(
         query = editorSearch.query,
         index = searchIndex,
         tick = searchTick,
