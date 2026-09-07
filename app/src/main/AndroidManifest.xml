@@ -1,11 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Rendered links open in the browser; the preview WebView itself has no network. -->
+    <!-- Rendered links open in the browser; the preview WebView itself has no network.
+         PARSER RULE (ParsingPackageUtils.parseQueries, AOSP 11+): each <intent> under
+         <queries> may have AT MOST ONE data scheme — a second <data scheme> fails the
+         whole install with INSTALL_PARSE_FAILED_MANIFEST_MALFORMED ("intent tag may
+         have at most one data scheme"). Keep one scheme per <intent>. -->
     <queries>
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
             <data android:scheme="http" />
         </intent>
     </queries>
@@ -17,12 +24,11 @@
         android:enableOnBackInvokedCallback="true">
 
         <!-- Preview WebView renders only bundled assets; no network use.
-             One instance per document: documentLaunchMode=intoExisting
-             REQUIRES launchMode=standard (official docs) — the parser
-             rejects any other combination and the package fails to install.
-             ACTION_VIEW opens a separate task per file (intoExisting reuses
-             the instance already showing that file), so opening from another
-             app never clobbers a dirty buffer. -->
+             One instance per document: documentLaunchMode=intoExisting is
+             documented for launchMode=standard (behavioral note, not a parser
+             rule). ACTION_VIEW opens a separate task per file (intoExisting
+             reuses the instance already showing that file), so opening from
+             another app never clobbers a dirty buffer. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
