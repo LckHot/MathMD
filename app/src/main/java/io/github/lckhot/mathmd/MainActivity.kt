@@ -5,7 +5,6 @@ package io.github.lckhot.mathmd
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -22,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -33,12 +31,12 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -50,7 +48,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import java.io.IOException
 
 class MainActivity : ComponentActivity() {
     /** Documents arriving via ACTION_VIEW (file manager, chat apps). */
@@ -145,74 +142,25 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     fun requestSearch() { searchTick++ }
 
     val resolver = context.contentResolver
-    // Single-threaded IO: quick successive opens complete in order
-    // (last-writer-wins is the wanted semantics; raw threads raced).
-    val io = remember { java.util.concurrent.Executors.newSingleThreadExecutor() }
-    androidx.compose.runtime.DisposableEffect(io) { onDispose { io.shutdown() } }
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
-    fun onUi(block: () -> Unit) {
-        mainHandler.post(block)
-    }
 
     fun toast(message: String) {
         Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
     }
 
-    fun displayName(uri: Uri): String =
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
-        } ?: "untitled.md"
-
-    fun loadFromUri(uri: Uri) {
-        io.execute {
-            try {
-                val content = resolver.openInputStream(uri)?.use {
-                    it.readBytes().toString(Charsets.UTF_8)
-                } ?: throw IOException("no data")
-                val name = displayName(uri)
-                try {
-                    resolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                    )
-                } catch (_: SecurityException) {
-                    // ACTION_VIEW grants are often session-scoped; save falls back to Save As.
-                }
-                onUi {
-                    doc.uri = uri
-                    doc.name = name
-                    doc.savedText = content
-                    text = content
-                    // NOTE: mode is NOT touched here — it is governed solely by
-                    // the startup-mode preference (set at composition and for
-                    // external opens). Forcing Edit here overrides the pref.
-                }
-            } catch (e: Exception) {
-                onUi { toast("Open failed: ${e.message}") }
-            }
-        }
+    val documentIo = remember {
+        DocumentIo(resolver, { block -> mainHandler.post(block) }, { msg -> toast(msg) })
     }
+    DisposableEffect(documentIo) { onDispose { documentIo.shutdown() } }
 
-    /**
-     * Async write. [content] is the snapshot to persist; [onOk] runs on the
-     * UI thread after a successful write. NOTE: "wt" truncates before
-     * writing — a mid-write provider failure leaves the file emptied
-     * (accepted: SAF offers no atomic replace; retry restores content).
-     */
-    fun writeTo(uri: Uri, content: String, onOk: () -> Unit) {
-        io.execute {
-            try {
-                resolver.openOutputStream(uri, "wt")?.use {
-                    it.write(content.toByteArray(Charsets.UTF_8))
-                } ?: throw IOException("no output stream")
-                onUi { onOk() }
-            } catch (e: SecurityException) {
-                onUi { toast("No write permission for this file") }
-            } catch (e: Exception) {
-                onUi { toast("Save failed: ${e.message}") }
-            }
-        }
+    fun loadFromUri(uri: Uri) = documentIo.loadFromUri(uri) { name, content ->
+        doc.uri = uri
+        doc.name = name
+        doc.savedText = content
+        text = content
+        // NOTE: mode is NOT touched here — it is governed solely by the
+        // startup-mode preference (set at composition and for external
+        // opens). Forcing Edit here overrides the pref.
     }
 
     val openLauncher = rememberLauncherForActivityResult(
@@ -251,17 +199,14 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     ) { uri ->
         if (uri != null) {
             val snapshot = text
-            io.execute {
-                val name = displayName(uri)
-                onUi {
-                    doc.uri = uri
-                    doc.name = name
-                    val reopenPicker = pendingOpenAfterSave
-                    pendingOpenAfterSave = false
-                    writeTo(uri, snapshot) {
-                        doc.savedText = snapshot
-                        if (reopenPicker) openLauncher.launch(OPEN_MIMES)
-                    }
+            documentIo.resolveName(uri) { name ->
+                doc.uri = uri
+                doc.name = name
+                val reopenPicker = pendingOpenAfterSave
+                pendingOpenAfterSave = false
+                documentIo.writeTo(uri, snapshot) {
+                    doc.savedText = snapshot
+                    if (reopenPicker) openLauncher.launch(OPEN_MIMES)
                 }
             }
         }
@@ -273,7 +218,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
         if (uri == null) {
             createLauncher.launch(doc.name)
         } else {
-            writeTo(uri, snapshot) {
+            documentIo.writeTo(uri, snapshot) {
                 doc.savedText = snapshot
                 toast("Saved")
             }
@@ -289,7 +234,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
             pendingOpenAfterSave = true
             createLauncher.launch(doc.name)
         } else {
-            writeTo(uri, snapshot) {
+            documentIo.writeTo(uri, snapshot) {
                 doc.savedText = snapshot
                 toast("Saved")
                 openLauncher.launch(OPEN_MIMES)
@@ -450,42 +395,22 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
         }
 
         if (showOpenGuard) {
-            AlertDialog(
-                onDismissRequest = { showOpenGuard = false },
-                title = { Text("Unsaved changes") },
-                confirmButton = {},
-                dismissButton = {},
-                text = {
-                    Column {
-                        Text("Unsaved changes in ${doc.name}.")
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                showOpenGuard = false
-                                saveThenOpen()
-                            },
-                        ) { Text("Save and open…", modifier = Modifier.fillMaxWidth()) }
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                showOpenGuard = false
-                                openLauncher.launch(OPEN_MIMES) // discard: this buffer is replaced
-                            },
-                        ) { Text("Discard changes and open…", modifier = Modifier.fillMaxWidth()) }
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = {
-                                showOpenGuard = false
-                                openInNewWindow = true
-                                openLauncher.launch(OPEN_MIMES)
-                            },
-                        ) { Text("Keep this, open in new window…", modifier = Modifier.fillMaxWidth()) }
-                        TextButton(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { showOpenGuard = false },
-                        ) { Text("Cancel", modifier = Modifier.fillMaxWidth()) }
-                    }
+            UnsavedChangesDialog(
+                docName = doc.name,
+                onSaveAndOpen = {
+                    showOpenGuard = false
+                    saveThenOpen()
                 },
+                onDiscardAndOpen = {
+                    showOpenGuard = false
+                    openLauncher.launch(OPEN_MIMES) // discard: this buffer is replaced
+                },
+                onKeepAndNewWindow = {
+                    showOpenGuard = false
+                    openInNewWindow = true
+                    openLauncher.launch(OPEN_MIMES)
+                },
+                onDismiss = { showOpenGuard = false },
             )
         }
 
