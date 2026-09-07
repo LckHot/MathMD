@@ -45,7 +45,16 @@ jobs:
         run: git diff --exit-code app/src/main/assets/preview/bundle.js
 
       - name: Build debug APK
+        # Same signing env as release.yml's release step: with secrets
+        # present, build.gradle.kts signs the DEBUG variant with the release
+        # key too, so test builds install as upgrades over released
+        # versions. (Without env the runner's random debug key would break
+        # every overwrite install — the ac1ca1e bug.)
         run: ./gradlew :app:assembleDebug --console=plain
+        env:
+          MATHMD_RELEASE_STORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
+          MATHMD_RELEASE_STORE_PASS: ${{ secrets.RELEASE_KEYSTORE_PASS }}
+          MATHMD_RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
 
       - name: Move rolling tag to this commit
         # action-gh-release does NOT move an existing tag, so without this
@@ -55,6 +64,13 @@ jobs:
         run: |
           git tag -f test-build
           git push -f origin refs/tags/test-build
+
+      - name: APK checksum
+        id: sum
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          echo "sha256=$(sha256sum $APK | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "bytes=$(stat -c%s $APK)" >> "$GITHUB_OUTPUT"
 
       - name: Publish rolling test prerelease
         # Fixed tag `test-build` (no v* prefix => release.yml never fires on
@@ -74,4 +90,9 @@ jobs:
             Signed with the release key (installs as an upgrade over released
             versions). Not an official release; official versions live in
             Releases under `v*` tags.
+
+            **Verify your download** (truncated downloads are the #1 install
+            failure — "解析软件包时出现问题"):
+            - size: `${{ steps.sum.outputs.bytes }}` bytes
+            - SHA-256: `${{ steps.sum.outputs.sha256 }}`
           files: app/build/outputs/apk/debug/app-debug.apk
