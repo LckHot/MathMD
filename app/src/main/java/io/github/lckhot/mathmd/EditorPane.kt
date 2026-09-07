@@ -1,21 +1,27 @@
 package io.github.lckhot.mathmd
 
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.sp
 import android.graphics.Typeface
+import kotlin.math.roundToInt
 
 /**
  * Search state handed to the editor pane. [tick] bumps on every
@@ -90,11 +96,28 @@ internal fun EditorPane(
         search?.onResult(ranges.size, active)
     }
 
-    // Navigation steps select the hit (the field scrolls to the selection).
+    val scrollState = rememberScrollState()
+    var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+
+    // Navigation selects the hit AND scrolls it into view. The field only
+    // auto-scrolls to the selection while FOCUSED — during a search focus
+    // lives in the search bar — so drive the ScrollState from the layout
+    // geometry ourselves (getBoundingBox uses layout coordinates, which the
+    // internal scroll offsets 1:1 apart from the small top content padding).
     LaunchedEffect(search?.tick, active) {
-        if (search != null && active >= 0) {
-            val r = ranges[active]
-            state.edit { selection = TextRange(r.first, r.last + 1) }
+        if (search == null || active < 0) return@LaunchedEffect
+        val r = ranges[active]
+        state.edit { selection = TextRange(r.first, r.last + 1) }
+        val layout = textLayout ?: return@LaunchedEffect
+        val viewport = scrollState.viewportSize
+        if (viewport <= 0) return@LaunchedEffect
+        val box = layout.getBoundingBox(r.first)
+        val visibleTop = scrollState.value.toFloat()
+        val visibleBottom = visibleTop + viewport
+        if (box.top < visibleTop + 8f || box.bottom > visibleBottom - 8f) {
+            val target = (box.top - viewport * 0.25f).roundToInt()
+                .coerceIn(0, scrollState.maxValue)
+            scrollState.animateScrollTo(target)
         }
     }
 
@@ -115,6 +138,8 @@ internal fun EditorPane(
     OutlinedTextField(
         state = state,
         outputTransformation = transformation,
+        onTextLayout = { getResult -> textLayout = getResult() },
+        scrollState = scrollState,
         modifier = modifier.fillMaxWidth(),
         textStyle = TextStyle(
             fontSize = fontSize.sp,
