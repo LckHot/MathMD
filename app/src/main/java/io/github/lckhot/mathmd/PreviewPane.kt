@@ -19,8 +19,12 @@ import org.json.JSONObject
  *  so the document queued before page load is not lost. */
 private class PreviewState {
     var ready: Boolean = false
+    /** Latest payload composition wants on the page. */
     var latestMarkdown: String = ""
     var latestOptions: String = "{}"
+    /** Payload actually pushed to the page (null = nothing pushed yet). */
+    var pushedMarkdown: String? = null
+    var pushedOptions: String? = null
     var lastSearchTick: Int = -1
 }
 
@@ -71,7 +75,13 @@ internal fun PreviewPane(
                     tag = state
                     // A fresh page is not ready until onPageFinished says so
                     // (stale true would inject into a half-loaded document).
+                    // The pushed payload belongs to the DEAD page, and the
+                    // search tick must re-fire so highlights return after
+                    // the re-push (hostUpdate clears them) — reset both.
                     state.ready = false
+                    state.pushedMarkdown = null
+                    state.pushedOptions = null
+                    state.lastSearchTick = -1
                     // Transparent so the theme-colored surface shows until first paint.
                     setBackgroundColor(android.graphics.Color.TRANSPARENT)
                     settings.javaScriptEnabled = true
@@ -97,6 +107,8 @@ internal fun PreviewPane(
                             val st = view.tag as PreviewState
                             st.ready = true
                             pushDocument(view, st.latestMarkdown, st.latestOptions)
+                            st.pushedMarkdown = st.latestMarkdown
+                            st.pushedOptions = st.latestOptions
                         }
 
                         override fun shouldOverrideUrlLoading(
@@ -126,10 +138,23 @@ internal fun PreviewPane(
                 val options = previewOptionsJson(appDark, fontName)
                 st.latestMarkdown = source
                 st.latestOptions = options
-                if (st.ready && visible) pushDocument(view, source, options)
+                // CHANGE GATE (blind-audit HIGH): push only when the payload
+                // actually changed. Ungated, ANY recomposition — a search
+                // keystroke, opening the menu — re-rendered the whole KaTeX
+                // document, and hostUpdate invalidated the find index: that
+                // was the residual preview-search lag. pushed* tracks what
+                // the PAGE shows, latest* what composition wants, so edits
+                // made while hidden (edit mode) still re-push on flip.
+                if (st.ready && visible &&
+                    (st.pushedMarkdown != source || st.pushedOptions != options)
+                ) {
+                    pushDocument(view, source, options)
+                    st.pushedMarkdown = source
+                    st.pushedOptions = options
+                }
                 // Search request: run when a fresh tick arrives while the
-                // page is visible and ready (mode flip re-pushes the doc and
-                // bumps the tick, so the highlight follows).
+                // page is visible and ready (mode flip bumps the tick from
+                // MainActivity, so the highlight follows without a re-push).
                 if (search != null && st.ready && visible && search.tick != st.lastSearchTick) {
                     st.lastSearchTick = search.tick
                     findInPreview(view, search.query, search.index) { t, a -> search.onResult(t, a) }
