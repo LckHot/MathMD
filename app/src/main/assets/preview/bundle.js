@@ -521,12 +521,29 @@
       const sel = window.getSelection?.();
       sel?.removeAllRanges();
     }
+    paintedRanges = null;
+  }
+  var findNodes = null;
+  var findData = [];
+  var findNodesRoot = null;
+  var findQuery = null;
+  var findRanges = [];
+  var paintedRanges = null;
+  function invalidateFindIndex() {
+    findNodes = null;
+    findData = [];
+    findNodesRoot = null;
+    findQuery = null;
+    findRanges = [];
+    paintedRanges = null;
   }
   function paint(ranges, active) {
     const g = globalThis;
     if (g.CSS?.highlights && g.Highlight) {
-      const others = ranges.filter((_, i) => i !== active);
-      g.CSS.highlights.set("mathmd-find", new g.Highlight(...others));
+      if (paintedRanges !== ranges) {
+        g.CSS.highlights.set("mathmd-find", new g.Highlight(...ranges));
+        paintedRanges = ranges;
+      }
       if (ranges[active]) g.CSS.highlights.set("mathmd-find-active", new g.Highlight(ranges[active]));
       else g.CSS.highlights.delete("mathmd-find-active");
       return;
@@ -558,19 +575,32 @@
       clearFind();
       return { total: 0, active: -1 };
     }
-    const q = query.toLowerCase();
-    const ranges = [];
-    for (const node of textNodesUnder(target)) {
-      const data = (node.nodeValue ?? "").toLowerCase();
-      let i = data.indexOf(q);
-      while (i !== -1) {
-        const r = document.createRange();
-        r.setStart(node, i);
-        r.setEnd(node, i + q.length);
-        ranges.push(r);
-        i = data.indexOf(q, i + q.length);
-      }
+    if (findNodesRoot !== target || findNodes === null) {
+      findNodes = textNodesUnder(target);
+      findData = findNodes.map((n) => (n.nodeValue ?? "").toLowerCase());
+      findNodesRoot = target;
+      findQuery = null;
+      findRanges = [];
     }
+    const nodes = findNodes;
+    const q = query.toLowerCase();
+    if (findQuery !== q) {
+      const ranges2 = [];
+      for (let k = 0; k < nodes.length; k++) {
+        const data = findData[k];
+        let i = data.indexOf(q);
+        while (i !== -1) {
+          const r = document.createRange();
+          r.setStart(nodes[k], i);
+          r.setEnd(nodes[k], i + q.length);
+          ranges2.push(r);
+          i = data.indexOf(q, i + q.length);
+        }
+      }
+      findQuery = q;
+      findRanges = ranges2;
+    }
+    const ranges = findRanges;
     if (ranges.length === 0) {
       clearFind();
       return { total: 0, active: -1 };
@@ -586,6 +616,7 @@
     try {
       if (opts) applyHostOptions(opts);
       clearFind();
+      invalidateFindIndex();
       const result = renderMarkdown(markdown, { salt: randomSalt() });
       target.innerHTML = result.html;
       postRender(target);

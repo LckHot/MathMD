@@ -96,15 +96,17 @@ function randomSalt(): string {
 }
 
 /**
- * In-document search for the preview (owner feature). STATELESS: the caller
- * (Kotlin) owns the cursor; this paints all matches with the CSS Custom
- * Highlight API (Chromium >= 105; zero DOM mutation, so KaTeX layout never
- * re-flows), the active match in its own color, clamps `active` into range,
- * and scrolls it into view through every nested scroll container (formulas
- * and tables scroll internally). Fallback on engines without the API:
- * native selection of the active match only (counting is a pure text walk
- * and always works). `.katex-mathml` is skipped: it duplicates every
- * formula's text invisibly and would double-count.
+ * In-document search for the preview (owner feature). The caller (Kotlin)
+ * owns the cursor (active index); this paints all matches with the CSS
+ * Custom Highlight API (Chromium >= 105; zero DOM mutation, so KaTeX
+ * layout never re-flows), the active match in its own color, clamps
+ * `active` into range, and scrolls it into view through every nested
+ * scroll container (formulas and tables scroll internally). Fallback on
+ * engines without the API: native selection of the active match only
+ * (counting is a pure text walk and always works). `.katex-mathml` is
+ * skipped: it duplicates every formula's text invisibly and would
+ * double-count. Matching state is cached per document (see below);
+ * hostUpdate invalidates it.
  */
 export interface FindResult {
   total: number;
@@ -147,6 +149,33 @@ function clearFind(): void {
     const sel = window.getSelection?.();
     sel?.removeAllRanges();
   }
+  paintedRanges = null;
+}
+
+/**
+ * Per-document search index. Measured on the owner's real document (3.5k
+ * text nodes, desktop Chromium): the per-call TreeWalker with its per-node
+ * ancestor climb was ~6ms of a ~6.5ms warm find — i.e. tens of ms PER
+ * KEYSTROKE on a phone, the visible jump lag. Nodes and their LOWERCASED
+ * text are cached once per rendered document, so a keystroke degenerates
+ * to a pure string scan (like the Kotlin editor side), and a step (same
+ * query) reuses the previous ranges wholesale. hostUpdate replaces
+ * innerHTML, so it must invalidate the index.
+ */
+let findNodes: Text[] | null = null;
+let findData: string[] = [];
+let findNodesRoot: HTMLElement | null = null;
+let findQuery: string | null = null;
+let findRanges: Range[] = [];
+let paintedRanges: Range[] | null = null;
+
+function invalidateFindIndex(): void {
+  findNodes = null;
+  findData = [];
+  findNodesRoot = null;
+  findQuery = null;
+  findRanges = [];
+  paintedRanges = null;
 }
 
 function paint(ranges: Range[], active: number): void {
@@ -155,8 +184,16 @@ function paint(ranges: Range[], active: number): void {
     Highlight?: new (...nodes: (Range | Node)[]) => unknown;
   };
   if (g.CSS?.highlights && g.Highlight) {
-    const others = ranges.filter((_, i) => i !== active);
-    g.CSS.highlights.set('mathmd-find', new g.Highlight(...others));
+    // ALL matches live in one highlight; the active match overlays it in
+    // its own color. Registry insertion order is fixed on first paint
+    // (mathmd-find before mathmd-find-active) and Map.set preserves it,
+    // so the active style always paints on top. When only `active` moved
+    // (stepping), the big highlight is left untouched — one 1-range
+    // update instead of rebuilding hundreds of ranges.
+    if (paintedRanges !== ranges) {
+      g.CSS.highlights.set('mathmd-find', new g.Highlight(...ranges));
+      paintedRanges = ranges;
+    }
     if (ranges[active]) g.CSS.highlights.set('mathmd-find-active', new g.Highlight(ranges[active]));
     else g.CSS.highlights.delete('mathmd-find-active');
     return;
@@ -204,19 +241,33 @@ export function find(query: string, active: number): FindResult {
     clearFind();
     return { total: 0, active: -1 };
   }
-  const q = query.toLowerCase();
-  const ranges: Range[] = [];
-  for (const node of textNodesUnder(target)) {
-    const data = (node.nodeValue ?? '').toLowerCase();
-    let i = data.indexOf(q);
-    while (i !== -1) {
-      const r = document.createRange();
-      r.setStart(node, i);
-      r.setEnd(node, i + q.length);
-      ranges.push(r);
-      i = data.indexOf(q, i + q.length);
-    }
+  // Build the per-document index once; reuse it across keystrokes/steps.
+  if (findNodesRoot !== target || findNodes === null) {
+    findNodes = textNodesUnder(target);
+    findData = findNodes.map((n) => (n.nodeValue ?? '').toLowerCase());
+    findNodesRoot = target;
+    findQuery = null;
+    findRanges = [];
   }
+  const nodes = findNodes;
+  const q = query.toLowerCase();
+  if (findQuery !== q) {
+    const ranges: Range[] = [];
+    for (let k = 0; k < nodes.length; k++) {
+      const data = findData[k];
+      let i = data.indexOf(q);
+      while (i !== -1) {
+        const r = document.createRange();
+        r.setStart(nodes[k], i);
+        r.setEnd(nodes[k], i + q.length);
+        ranges.push(r);
+        i = data.indexOf(q, i + q.length);
+      }
+    }
+    findQuery = q;
+    findRanges = ranges;
+  }
+  const ranges = findRanges;
   if (ranges.length === 0) {
     clearFind();
     return { total: 0, active: -1 };
@@ -232,8 +283,10 @@ export function hostUpdate(markdown: string, opts?: HostOptions): void {
   if (!target) return;
   try {
     if (opts) applyHostOptions(opts);
-    // innerHTML replacement orphans old match ranges/highlights.
+    // innerHTML replacement orphans old match ranges/highlights AND every
+    // cached text node — drop the search index with the highlights.
     clearFind();
+    invalidateFindIndex();
     const result = renderMarkdown(markdown, { salt: randomSalt() });
     target.innerHTML = result.html;
     postRender(target);
