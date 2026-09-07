@@ -65,7 +65,13 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         viewUri.value = extractViewUri(intent)
         if (viewUri.value != null) viewRequest.value++
-        setContent { MathMdApp(externalUri = viewUri.value, viewRequest = viewRequest.value) }
+        setContent {
+            MathMdApp(
+                externalUri = viewUri.value,
+                viewRequest = viewRequest.value,
+                processRestored = savedInstanceState != null,
+            )
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -87,13 +93,6 @@ private val OPEN_MIMES = arrayOf(
     "text/markdown", "text/x-markdown", "text/plain", "application/octet-stream",
 )
 
-/** Current backing document. */
-private class DocState {
-    var uri: Uri? = null
-    var name: String = "untitled.md"
-    var savedText: String = ""
-}
-
 private fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode) {
     "light" -> false
     "dark" -> true
@@ -101,7 +100,7 @@ private fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode
 }
 
 @Composable
-private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
+private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Boolean) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
 
@@ -124,7 +123,9 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     var showSettings by rememberSaveable { mutableStateOf(false) }
     var menuOpen by rememberSaveable { mutableStateOf(false) }
 
-    val doc = remember { DocState() }
+    val doc = rememberSaveable(saver = DocumentState.Saver) {
+        DocumentState(null, "untitled.md", "")
+    }
     val dirty = text != doc.savedText
 
     // Open-button guard flow: dirty buffer -> dialog FIRST, then the picker.
@@ -246,10 +247,23 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int) {
     // preference. With documentLaunchMode=intoExisting each file gets its
     // own instance; re-shooting the same file lands here via onNewIntent
     // with a bumped viewRequest, so the reload still happens.
+    //
+    // PROCESS RESTORE (blind-audit CRITICAL): after the process is killed
+    // and recreated, the original ACTION_VIEW intent is redelivered — but
+    // rememberSaveable has already restored the buffer AND the DocumentState
+    // (with unsaved edits). Re-loading the SAME uri from disk here would
+    // silently clobber those edits, so skip it; a DIFFERENT uri is a
+    // genuine new open and always loads.
+    var restoredViewHandled by remember { mutableStateOf(false) }
     LaunchedEffect(externalUri, viewRequest) {
         if (externalUri != null) {
-            mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
-            loadFromUri(externalUri)
+            val wouldClobberRestore =
+                processRestored && !restoredViewHandled && externalUri == doc.uri
+            if (!wouldClobberRestore) {
+                mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
+                loadFromUri(externalUri)
+            }
+            restoredViewHandled = true
         }
     }
 
