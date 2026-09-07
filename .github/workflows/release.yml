@@ -2,7 +2,8 @@ name: Release
 
 # Builds run ONLY when a version tag is pushed — documentation-only
 # commits to main never trigger a compile. Manual test builds live in
-# build-test.yml (debug APK artifact only, no signing, no publishing).
+# build-test.yml: signed release-variant APK published to the rolling
+# `test-build` prerelease (manual workflow_dispatch only).
 on:
   push:
     tags: [ 'v*' ]
@@ -55,6 +56,9 @@ jobs:
           fi
 
       - name: Build debug APK
+        # Kept as a secondary asset for troubleshooting: it is debug-key
+        # signed and debuggable, useful when a release-only failure needs
+        # bisecting. The signed release APK below is the recommended asset.
         run: ./gradlew :app:assembleDebug --console=plain
 
       - name: Build signed release APK

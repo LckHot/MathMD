@@ -209,10 +209,16 @@ internal fun findInPreview(
 ) {
     val expr = "JSON.stringify(MathMD.find(${JSONObject.quote(query)}, $index))"
     view.evaluateJavascript(expr) { result ->
-        // evaluateJavascript returns a JSON-quoted string for string results
-        val json = result?.removeSurrounding("\"")?.replace("\\\"", "\"")
+        // evaluateJavascript returns a JSON-quoted string for string results;
+        // null means the JS never ran (bridge/page failure), NOT "no match".
+        if (result == null) {
+            android.util.Log.e("MathMD", "find bridge failure: null result")
+            onResult(0, -1)
+            return@evaluateJavascript
+        }
+        val json = result.removeSurrounding("\"").replace("\\\"", "\"")
         try {
-            val o = JSONObject(json ?: "{}")
+            val o = JSONObject(json)
             onResult(o.optInt("total"), o.optInt("active"))
         } catch (_: Exception) {
             android.util.Log.e("MathMD", "find bridge failure: $result")

@@ -105,6 +105,10 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     }
     return -1;
   };
+  // Worst case is O(n x openers) (every opener scans to EOF when unclosed).
+  // Acceptable: real documents escape literal $ per the strict rule, so
+  // unclosed openers are rare; revisit with a closer-candidate index only
+  // if a pathological document ever shows a measurable render stall.
 
   const pushMath = (p: number, openLen: number, closeIdx: number, closeLen: number, display: boolean): number => {
     const token = mathToken();
@@ -115,7 +119,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
 
   /** Math openers, longest-first. Returns new index, or -1 if no opener here. */
   const tryMath = (p: number): number => {
-    const two = source.substr(p, 2);
+    const two = source.substring(p, p + 2);
     if (two === '$$') {
       const c = scanCloser(p + 2, '$$');
       return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
@@ -271,7 +275,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     // without the \` case an escaped backtick would open a fake code span
     // (the backslash gets emitted, then the bare ` matches as opener).
     if (source[i] === '\\' && (source[i + 1] === '$' || source[i + 1] === '\\' || source[i + 1] === '`')) {
-      out += source.substr(i, 2);
+      out += source.substring(i, i + 2);
       i += 2;
       continue;
     }

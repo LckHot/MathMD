@@ -138,7 +138,7 @@ const DISP = 'katex-display';
   check('second $ closes the first pair; remainder prose', r.mathCount === 1 && r.html.includes('3 back'), `count=${r.mathCount} html=${r.html}`);
 }
 
-// 4c. CJK emphasis (markdown-it-cjk-friendly): CommonMark rejects )**汉字
+// 4. CJK emphasis (markdown-it-cjk-friendly): CommonMark rejects )**汉字
 //     closers; the plugin must restore bold/italic in CJK prose.
 {
   const r = renderMarkdown('经典线索为：Dyer−Edmunds (1970) 的初步结果；**Kim−Kozono (2006)**证明若 $u(x)=o(1/|x|)$ 成立');
@@ -148,7 +148,7 @@ const DISP = 'katex-display';
   check('CJK: *italic* before CJK char', i.html.includes('<em>重要</em>'), i.html);
 }
 
-// 4. Code constructs shield math
+// 5. Code constructs shield math
 {
   const r = renderMarkdown('use `$x_i$` literally');
   check('code span shields math', r.mathCount === 0 && r.html.includes('<code>$x_i$</code>'), r.html);
@@ -162,7 +162,7 @@ const DISP = 'katex-display';
   check('indented block shields math', r.mathCount === 0 && r.html.includes('<pre>'), r.html);
 }
 
-// 4b. Review fixes: escaped backticks, code-restore shape, salt collisions
+// 6. Review fixes: escaped backticks, code-restore shape, salt collisions
 {
   // #1: \` must NOT open a code span; markdown-it renders it as a literal `
   const r = renderMarkdown('a \\`code\\` b');
@@ -188,7 +188,7 @@ const DISP = 'katex-display';
     html.includes('MMATHMDPHK70MMM') && html.includes(K), html.slice(0, 200));
 }
 
-// 5. Escapes and fallbacks
+// 7. Escapes and fallbacks
 {
   const r = renderMarkdown('price is \\$5 today');
   check('escaped dollar literal', r.html.includes('$5'), r.html);
@@ -202,7 +202,7 @@ const DISP = 'katex-display';
   check('links still work alongside math', r.html.includes('<a href="https://example.com">') && r.mathCount === 1, r.html);
 }
 
-// 6. Errors surface, not crash
+// 8. Errors surface, not crash
 {
   const r = renderMarkdown('$\\thisIsNotACommand$');
   check('bad tex -> katex red fallback (no throw)', r.html.includes('#cc0000'), r.html.slice(0, 200));
@@ -212,20 +212,20 @@ const DISP = 'katex-display';
   check('bad tex + throwOnError -> error span', r.errors.length === 1 && r.html.includes('math-error'), r.html.slice(0, 200));
 }
 
-// 7. Salt collision guard
+// 9. Salt collision guard
 {
   const literal = 'MMATHMDPHK70MMM';
   const r = renderMarkdown(`keep ${literal} and formula $x$`, { salt: 'ZZ' });
   check('salt bump avoids collision', r.mathCount === 1 && r.html.includes(literal), r.html);
 }
 
-// 8. protectMath unit sanity
+// 10. protectMath unit sanity
 {
   const p = protectMath('a $x$ b', 'T1');
   check('protectMath token shape', p.math.length === 1 && p.math[0].token === 'MMATHMDPHT10MMM' && p.text === `a ${p.math[0].token} b`, JSON.stringify(p));
 }
 
-// 9. hostUpdate bridge end-to-end (this was the missing function in v0.1)
+// 11. hostUpdate bridge end-to-end (this was the missing function in v0.1)
 {
   previewEl.innerHTML = '';
   ctx.MathMD.hostUpdate('# Title\\n\\n$x_i$ ok');
@@ -249,7 +249,7 @@ const DISP = 'katex-display';
   check('hostUpdate applies theme+font opts', doc.documentElement.dataset.theme === 'dark', JSON.stringify(doc.documentElement.dataset));
 }
 
-// 10. Equation tags land in the inline flow after the formula (not absolute-
+// 12. Equation tags land in the inline flow after the formula (not absolute-
 //     positioned at the right edge). CSS enforces the visual behavior; here we
 //     pin the DOM/level facts that make it possible: tag is a sibling AFTER
 //     the .katex-base content inside .katex-html.
@@ -261,7 +261,7 @@ const DISP = 'katex-display';
   check('display \\tag renders tag inside katex-html after content', r.mathCount === 1 && iBase !== -1 && iTag > iBase, html.slice(0, 200));
 }
 
-// 11. Search bridge: MathMD.find must be registered for Kotlin and must
+// 13. Search bridge: MathMD.find must be registered for Kotlin and must
 //     fail safe (no throw, zero count) on a DOM without TreeWalker — the
 //     real matching/highlighting behavior is browser-only (Custom Highlight
 //     API) and verified by hand per AGENTS.md policy.
@@ -274,7 +274,7 @@ const DISP = 'katex-display';
   check('find fails safe on the DOM stub', threw === null && res && res.total === 0 && res.active === -1, `threw=${threw} res=${JSON.stringify(res)}`);
 }
 
-// 12. Contract drift guards (blind-review #17 #18): the Kotlin bridge fallback
+// 14. Contract drift guards (blind-review #17 #18): the Kotlin bridge fallback
 //     font stack and the +32px padding arithmetic must stay byte-identical to
 //     what preview.css actually uses, or the chars->px viewport measurement
 //     silently drifts from the rendered layout.
@@ -298,7 +298,7 @@ const DISP = 'katex-display';
     (cssPad === '16.0' || cssPad === '16') && htmlPad, `cssPad=${cssPad} htmlContract=${htmlPad}`);
 }
 
-// 11. Page-width contract lives in preview.html's boot script (viewport is
+// 15. Page-width contract lives in preview.html's boot script (viewport is
 //     locked BEFORE first layout; the bundle no longer touches it). Pin the
 //     host<->page contract statically so a refactor cannot silently break it.
 {

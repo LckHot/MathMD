@@ -20,6 +20,9 @@
       * Owner's ">=14 acceptable" is headroom, not the requirement.
   - compileSdk / targetSdk **36** (Android 16, API level verified via
     developer.android.com Play target-SDK policy: mandatory ≥36 since 2026-08-31)
+    — REVISION 2026-09-07: compileSdk raised to **37** at Compose BOM 2026.09's
+    requirement (AGP warning: "compileSdk 36 < BOM's 37"); targetSdk stays 36
+    per the Play policy above. Recorded here, in app/build.gradle.kts, only.
   - AGP **9.3.2** (current stable line 9.3, July 2026; 9.4.0 released ~2026-09-01, too fresh)
   - Gradle wrapper **9.7.1** (AGP 9.0 compatibility table: requires Gradle ≥ 9.1.0)
   - **JDK 17** — AGP 9.0 table lists min AND default JDK 17; sandbox JDK 17.0.20 already fits

@@ -46,11 +46,13 @@ jobs:
         run: git diff --exit-code app/src/main/assets/preview/bundle.js
 
       - name: Build release APK (signed, debuggable=false)
-        # Release variant on purpose: every debug-variant APK failed to
-        # install on both owner devices (fresh installs, "problem with the
-        # app file"), while release-variant APKs from release.yml always
-        # installed. debuggable=true is the prime suspect (Android 16-era
-        # sideload policy); release variant also matches production behavior.
+        # Release variant: matches production behavior and ships the same
+        # signing key as releases, so rolling builds update over them.
+        # (History: the v1.1.1-era install failures were caused by a manifest
+        # <queries> bug — INSTALL_PARSE_FAILED_MANIFEST_MALFORMED, one data
+        # scheme per <intent> — fixed in c43fa84; the earlier "debuggable is
+        # the prime suspect" theory in this comment was wrong and is kept
+        # out on purpose. Debug-variant APKs install fine.)
         run: ./gradlew :app:assembleRelease --console=plain
         env:
           MATHMD_RELEASE_STORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}

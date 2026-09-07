@@ -39,7 +39,7 @@
       return closeIdx + closeLen;
     };
     const tryMath = (p) => {
-      const two = source.substr(p, 2);
+      const two = source.substring(p, p + 2);
       if (two === "$$") {
         const c = scanCloser(p + 2, "$$");
         return c === -1 ? skipOne(p) : pushMath(p, 2, c, 2, true);
@@ -186,7 +186,7 @@
         continue;
       }
       if (source[i] === "\\" && (source[i + 1] === "$" || source[i + 1] === "\\" || source[i + 1] === "`")) {
-        out += source.substr(i, 2);
+        out += source.substring(i, i + 2);
         i += 2;
         continue;
       }
