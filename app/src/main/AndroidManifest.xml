@@ -17,13 +17,16 @@
         android:enableOnBackInvokedCallback="true">
 
         <!-- Preview WebView renders only bundled assets; no network use.
-             One instance per document: ACTION_VIEW opens a separate task per
-             file (intoExisting reuses the instance already showing that file),
-             so opening from another app never clobbers a dirty buffer. -->
+             One instance per document: documentLaunchMode=intoExisting
+             REQUIRES launchMode=standard (official docs) — the parser
+             rejects any other combination and the package fails to install.
+             ACTION_VIEW opens a separate task per file (intoExisting reuses
+             the instance already showing that file), so opening from another
+             app never clobbers a dirty buffer. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="standard"
             android:documentLaunchMode="intoExisting"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:windowSoftInputMode="adjustResize">
