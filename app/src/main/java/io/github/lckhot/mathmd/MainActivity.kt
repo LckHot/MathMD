@@ -128,10 +128,13 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     }
     val dirty = text != doc.savedText
 
-    // Open-button guard flow: dirty buffer -> dialog FIRST, then the picker.
-    var showOpenGuard by rememberSaveable { mutableStateOf(false) }
+    // Open/New-button guard flow: dirty buffer -> dialog FIRST, then the
+    // follow-up action (picker for Open, blank document for New). Open and
+    // New handle an unsaved document identically (owner spec); only the
+    // "continue" action differs.
+    var guardAction by rememberSaveable { mutableStateOf<GuardAction?>(null) }
     var openInNewWindow by remember { mutableStateOf(false) }
-    var pendingOpenAfterSave by remember { mutableStateOf(false) }
+    var pendingActionAfterSave by remember { mutableStateOf<GuardAction?>(null) }
 
     // Search: cursor lives HERE, shared by both panes (owner spec: search
     // works in Edit and Preview; flipping modes re-runs the same query).
@@ -192,6 +195,23 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         }
     }
 
+    /** Reset this window to a fresh blank document (New). */
+    fun newDocument() {
+        doc.uri = null
+        doc.name = "untitled.md"
+        doc.savedText = ""
+        text = ""
+        // mode is NOT touched here either — same rule as loadFromUri.
+    }
+
+    /** The follow-up a guard decision unlocks for action [action]. */
+    fun afterGuardAction(action: GuardAction) {
+        when (action) {
+            GuardAction.Open -> openLauncher.launch(OPEN_MIMES)
+            GuardAction.New -> newDocument()
+        }
+    }
+
     // CreateDocument serves both first-time Save on an untitled buffer and
     // Save as…: in both cases the picked location becomes the document this
     // app saves to from now on.
@@ -203,11 +223,11 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
             documentIo.resolveName(uri) { name ->
                 doc.uri = uri
                 doc.name = name
-                val reopenPicker = pendingOpenAfterSave
-                pendingOpenAfterSave = false
+                val followUp = pendingActionAfterSave
+                pendingActionAfterSave = null
                 documentIo.writeTo(uri, snapshot) {
                     doc.savedText = snapshot
-                    if (reopenPicker) openLauncher.launch(OPEN_MIMES)
+                    if (followUp != null) afterGuardAction(followUp)
                 }
             }
         }
@@ -226,20 +246,41 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         }
     }
 
-    /** Save, then continue into the file picker (Open-guard path). */
-    fun saveThenOpen() {
+    /** Save, then continue with the guarded action (Open/New-guard path). */
+    fun saveThen(action: GuardAction) {
         val uri = doc.uri
         val snapshot = text
         if (uri == null) {
-            // Untitled + dirty: Save As first; picker follows once it lands.
-            pendingOpenAfterSave = true
+            // Untitled + dirty: Save As first; the action follows once it lands.
+            pendingActionAfterSave = action
             createLauncher.launch(doc.name)
         } else {
             documentIo.writeTo(uri, snapshot) {
                 doc.savedText = snapshot
                 toast("Saved")
-                openLauncher.launch(OPEN_MIMES)
+                afterGuardAction(action)
             }
+        }
+    }
+
+    /**
+     * "Keep this, new window" for New: a blank document has no Uri to
+     * ACTION_VIEW, so launch a fresh MainActivity instance instead.
+     * documentLaunchMode=intoExisting turns it into its own document task;
+     * MULTIPLE_TASK forces a NEW task even if an earlier blank one exists.
+     */
+    fun openBlankInNewWindow() {
+        val blank = Intent(Intent.ACTION_MAIN).apply {
+            setClass(context, MainActivity::class.java)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_MULTIPLE_TASK,
+            )
+        }
+        try {
+            context.startActivity(blank)
+        } catch (e: Exception) {
+            toast("Could not open a new window: ${e.message}")
+            newDocument() // fallback: new document in this instance
         }
     }
 
@@ -314,12 +355,22 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
+                                text = { Text("New") },
+                                onClick = {
+                                    menuOpen = false
+                                    // Same guard as Open (owner spec): dirty
+                                    // buffer asks first, then the blank doc.
+                                    if (dirty) guardAction = GuardAction.New
+                                    else newDocument()
+                                },
+                            )
+                            DropdownMenuItem(
                                 text = { Text("Open") },
                                 onClick = {
                                     menuOpen = false
                                     // Dirty buffer: ask FIRST (save / discard /
                                     // new window), then show the picker.
-                                    if (dirty) showOpenGuard = true
+                                    if (dirty) guardAction = GuardAction.Open
                                     else openLauncher.launch(OPEN_MIMES)
                                 },
                             )
@@ -408,23 +459,31 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
             }
         }
 
-        if (showOpenGuard) {
+        if (guardAction != null) {
+            val action = guardAction!!
             UnsavedChangesDialog(
                 docName = doc.name,
-                onSaveAndOpen = {
-                    showOpenGuard = false
-                    saveThenOpen()
+                action = action,
+                onSaveAndContinue = {
+                    guardAction = null
+                    saveThen(action)
                 },
-                onDiscardAndOpen = {
-                    showOpenGuard = false
-                    openLauncher.launch(OPEN_MIMES) // discard: this buffer is replaced
+                onDiscardAndContinue = {
+                    guardAction = null
+                    // discard: this buffer is replaced (by the picked file /
+                    // the blank document)
+                    afterGuardAction(action)
                 },
                 onKeepAndNewWindow = {
-                    showOpenGuard = false
-                    openInNewWindow = true
-                    openLauncher.launch(OPEN_MIMES)
+                    guardAction = null
+                    if (action == GuardAction.Open) {
+                        openInNewWindow = true
+                        openLauncher.launch(OPEN_MIMES)
+                    } else {
+                        openBlankInNewWindow()
+                    }
                 },
-                onDismiss = { showOpenGuard = false },
+                onDismiss = { guardAction = null },
             )
         }
 

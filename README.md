@@ -33,7 +33,8 @@ spans/fences that must stay literal).
 - Edit / Preview flip toggle; configurable startup mode
 - In-document search with match highlighting and next/previous navigation,
   working in both the editor and the rendered preview
-- Open via system file picker or "Open with…" from other apps; save in place or as a copy
+- New blank document; open via system file picker or "Open with…" from other
+  apps; save in place or as a copy
 - Light/dark/system theme; per-pane font family and editor font size
 - Fixed line width in characters (optional): the page wraps once at that
   column and the default zoom fits it exactly to the screen (no horizontal
