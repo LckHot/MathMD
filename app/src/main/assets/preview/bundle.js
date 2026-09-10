@@ -196,6 +196,69 @@
     return { text: out, math, code };
   }
 
+  // tools/preview-src/src/tsvtables.ts
+  function isTsvLine(line) {
+    return line.indexOf("	") !== -1;
+  }
+  function convertTsvTables(text) {
+    const lines = text.split("\n");
+    const out = [];
+    let i = 0;
+    while (i < lines.length) {
+      if (!isTsvLine(lines[i])) {
+        out.push(lines[i]);
+        i++;
+        continue;
+      }
+      const paras = [];
+      let cols = 1;
+      let end = i;
+      for (; ; ) {
+        const rows = [];
+        while (end < lines.length && isTsvLine(lines[end])) {
+          const cells = lines[end].split("	");
+          if (cells.length > cols) cols = cells.length;
+          rows.push(cells);
+          end++;
+        }
+        paras.push({ rows, cols });
+        let next = end;
+        while (next < lines.length && lines[next].trim() === "") next++;
+        if (next < lines.length && isTsvLine(lines[next]) && lines[next].split("	").length === cols) {
+          end = next;
+          continue;
+        }
+        break;
+      }
+      const totalRows = paras.reduce((s, p) => s + p.rows.length, 0);
+      if (totalRows < 2) {
+        for (let k = i; k < end; k++) out.push(lines[k]);
+        i = end;
+        continue;
+      }
+      const escapeCell = (c) => c.trim().replace(/\|/g, "\\|");
+      const tableLine = (cells) => {
+        const cs = cells.map(escapeCell);
+        while (cs.length < cols) cs.push("");
+        return `| ${cs.join(" | ")} |`;
+      };
+      let first = true;
+      if (out.length > 0 && out[out.length - 1].trim() !== "") out.push("");
+      for (const p of paras) {
+        for (const cells of p.rows) {
+          out.push(tableLine(cells));
+          if (first) {
+            first = false;
+            out.push(`|${" --- |".repeat(cols)}`);
+          }
+        }
+      }
+      if (end < lines.length && lines[end].trim() !== "") out.push("");
+      i = end;
+    }
+    return out.join("\n");
+  }
+
   // tools/node_modules/get-east-asian-width/lookup-data.js
   var ambiguousMinimalCodePoint = 161;
   var ambiguousMaximumCodePoint = 1114109;
@@ -413,9 +476,10 @@
     const salt = opts.salt ?? "K7";
     const errors = [];
     const prot = protectMath(source, salt);
+    const mdSource = convertTsvTables(prot.text);
     const md = v.markdownit({ html: false, linkify: true });
     md.use(markdownItCjkFriendlyPlugin);
-    let html = md.render(prot.text);
+    let html = md.render(mdSource);
     html = html.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok) => {
       const seg = prot.code.find((s) => s.token === tok);
       if (!seg) return tok;

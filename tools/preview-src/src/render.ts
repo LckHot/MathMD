@@ -1,7 +1,8 @@
 /**
  * MathMD preview render pipeline.
  *
- *   source → protectMath() → markdown-it → restore code → KaTeX-restore math → HTML
+ *   source → protectMath() → tsv-table conversion → markdown-it
+ *         → restore code → KaTeX-restore math → HTML
  *
  * This module is bundled by esbuild into an IIFE and loaded in the preview
  * WebView after the vendored markdown-it and KaTeX scripts. It registers
@@ -16,6 +17,7 @@ import {
   MATH_TOKEN_SOURCE,
   CODE_TOKEN_SOURCE,
 } from './delimiters';
+import { convertTsvTables } from './tsvtables';
 // MIT, https://github.com/tats-u/markdown-cjk-friendly — CommonMark's
 // right-flanking rules reject `)**汉字` as a closing emphasis delimiter
 // (the char after the closer is a LETTER in Unicode), silently breaking
@@ -79,9 +81,13 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   const errors: MathError[] = [];
 
   const prot = protectMath(source, salt);
+  // ChatGPT-style tab-separated blocks become GFM pipe tables BEFORE the
+  // parser sees them (and AFTER protection: the text here carries math/code
+  // placeholders, so cell splitting can never touch a formula or code).
+  const mdSource = convertTsvTables(prot.text);
   const md = v.markdownit({ html: false, linkify: true });
   md.use(cjkFriendly);
-  let html = md.render(prot.text);
+  let html = md.render(mdSource);
 
   // ---- restore code constructs verbatim ----
   // Dispatch on the segment's construct (never sniff the raw text: a fence

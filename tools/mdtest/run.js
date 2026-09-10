@@ -340,6 +340,72 @@ const DISP = 'katex-display';
     ind.html.includes('<pre><code>$x_i$ indented') && !/<code><code>/.test(ind.html), ind.html);
 }
 
+// 17. TSV tables (ChatGPT-style tab-separated blocks): ChatGPT's web client
+//     renders these as real tables; the pipeline converts them to pipe
+//     tables after math protection, before markdown-it.
+{
+  // Motivating sample: header, blank line, data rows, math in cells.
+  const tsv = [
+    '时间\t结果\t对 Ding–Mossel question 的进展',
+    '',
+    '2014 Ding–Mossel\t\\(t_{\\rm mix}=O_\\varepsilon(n^3)\\)\t提出 \\(O_\\varepsilon(n\\log n)\\) conjecture',
+    '2025 Fei–Ferreira Pinto\tsharp Poincaré / spectral gap \\(\\asymp 1/n\\)\t对所有 constant-density monotone sets 得到 \\(O(n^2)\\)',
+    '2026 Santos–Tripathi–Youssef\ttypical random monotone set 的 \\(t_{\\rm LS}\\asymp n\\)\t对几乎所有 monotone sets 得到 \\(O(n\\log n)\\)',
+  ].join('\n');
+  const r = renderMarkdown(tsv);
+  check('ChatGPT TSV sample: one table, 3 columns, 4 rows',
+    (r.html.match(/<table>/g) || []).length === 1 &&
+      (r.html.match(/<th>/g) || []).length === 3 &&
+      (r.html.match(/<tr>/g) || []).length === 4, r.html.slice(0, 400));
+  check('ChatGPT TSV sample: cell math renders after restore',
+    r.mathCount === 6 && r.html.includes(K), `count=${r.mathCount} html=${r.html.slice(0, 200)}`);
+}
+{
+  // A blank line between EVERY row still merges into one table.
+  const r = renderMarkdown('a\tb\tc\n\n1\t2\t3\n\n4\t5\t6');
+  check('blank-line-separated TSV rows merge into one table',
+    (r.html.match(/<table>/g) || []).length === 1 && (r.html.match(/<tr>/g) || []).length === 3, r.html);
+}
+{
+  // Tabs inside a fence never convert (fences are extracted first).
+  const r = renderMarkdown('```\na\tb\nx\ty\n```');
+  check('tabs inside a fence stay code',
+    (r.html.match(/<table>/g) || []).length === 0 && r.html.includes('<pre>') && r.html.includes('a\tb'), r.html);
+}
+{
+  // A lone tab-carrying line stays prose.
+  const r = renderMarkdown('key\tvalue\n\nplain paragraph');
+  check('single tab line stays prose', (r.html.match(/<table>/g) || []).length === 0, r.html);
+}
+{
+  // Different cell counts across a blank line: two unrelated blocks, no table.
+  const r = renderMarkdown('a\tb\n\nc\td\te');
+  check('cell-count mismatch across blank line: no table', (r.html.match(/<table>/g) || []).length === 0, r.html);
+}
+{
+  // A TSV block glued to prose forms its own block (blank lines inserted).
+  const r = renderMarkdown('prose line\nh1\th2\th3\nd1\td2\td3\nafter text');
+  check('TSV block glued to prose: table separated on both sides',
+    (r.html.match(/<table>/g) || []).length === 1 &&
+      r.html.includes('<p>prose line</p>') && r.html.includes('<p>after text</p>'), r.html);
+}
+{
+  // Ordinary pipe tables pass through untouched.
+  const r = renderMarkdown('| a | b |\n| --- | --- |\n| 1 | 2 |');
+  check('pipe table unchanged by the TSV pass',
+    (r.html.match(/<table>/g) || []).length === 1 && (r.html.match(/<th>/g) || []).length === 2, r.html);
+}
+{
+  // Ragged rows are padded to the run's widest row.
+  const r = renderMarkdown('a\tb\tc\n1\t2');
+  check('ragged TSV row padded to header width', (r.html.match(/<td>/g) || []).length === 3, r.html);
+}
+{
+  // A literal pipe inside a cell is escaped, not treated as a column break.
+  const r = renderMarkdown('a\tb\nx\ty|z');
+  check('pipe inside a TSV cell escapes to a literal |', r.html.includes('<td>y|z</td>'), r.html);
+}
+
 // ---- report ----
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) {
