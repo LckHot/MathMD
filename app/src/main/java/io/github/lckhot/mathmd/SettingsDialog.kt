@@ -44,12 +44,18 @@ internal fun SettingsDialog(
     editorFont: String,
     previewFont: String,
     pageWidthCh: Int,
+    tsvTables: Boolean,
+    tsvMinRows: Int,
+    tsvMinCols: Int,
     onTheme: (String) -> Unit,
     onEditorSize: (Int) -> Unit,
     onEditorFont: (String) -> Unit,
     onPreviewFont: (String) -> Unit,
     onPageWidth: (Int) -> Unit,
     onStartupMode: (String) -> Unit,
+    onTsvTables: (Boolean) -> Unit,
+    onTsvMinRows: (Int) -> Unit,
+    onTsvMinCols: (Int) -> Unit,
     startupMode: String,
     onDismiss: () -> Unit,
 ) {
@@ -100,6 +106,26 @@ internal fun SettingsDialog(
                 }
                 SettingRow("Line width in characters (0 = fill screen)") {
                     SizeField(pageWidthCh, onPageWidth, min = 0, max = 200)
+                }
+                // TSV-table compatibility (ChatGPT-style tab-separated
+                // blocks). On = convert qualifying blocks to real tables.
+                SettingRow("TSV tables (ChatGPT-style)") {
+                    for (on in listOf(true, false)) {
+                        FilterChip(
+                            selected = tsvTables == on,
+                            onClick = { onTsvTables(on) },
+                            label = { Text(if (on) "On" else "Off") },
+                            modifier = Modifier.padding(end = 6.dp),
+                        )
+                    }
+                }
+                if (tsvTables) {
+                    SettingRow("TSV minimum rows (2–20)") {
+                        SizeField(tsvMinRows, onTsvMinRows, min = 2, max = 20)
+                    }
+                    SettingRow("TSV minimum columns (2–10)") {
+                        SizeField(tsvMinCols, onTsvMinCols, min = 2, max = 10)
+                    }
                 }
             }
         },

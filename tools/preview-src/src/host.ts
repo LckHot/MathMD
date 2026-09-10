@@ -14,6 +14,12 @@ export interface HostOptions {
   theme?: 'system' | 'light' | 'dark';
   /** CSS font-family for preview text ('' = bundle default stack). */
   fontFamily?: string;
+  /** ChatGPT-style TSV block → table conversion (default true). */
+  tsvTables?: boolean;
+  /** Minimum consecutive TSV lines that form a table (default 3). */
+  tsvMinRows?: number;
+  /** Minimum cells (tab-separated) per line (default 2). */
+  tsvMinCols?: number;
 }
 
 function escapeHtml(s: string): string {
@@ -295,7 +301,12 @@ export function hostUpdate(markdown: string, opts?: HostOptions): void {
     // cached text node — drop the search index with the highlights.
     clearFind();
     invalidateFindIndex();
-    const result = renderMarkdown(markdown, { salt: randomSalt() });
+    const result = renderMarkdown(markdown, {
+      salt: randomSalt(),
+      tsvTables: opts?.tsvTables,
+      tsvMinRows: opts?.tsvMinRows,
+      tsvMinCols: opts?.tsvMinCols,
+    });
     target.innerHTML = result.html;
     postRender(target);
     if (result.errors.length > 0) {

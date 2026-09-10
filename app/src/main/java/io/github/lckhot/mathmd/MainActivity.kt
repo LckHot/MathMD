@@ -116,6 +116,12 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     var previewFont by remember { mutableStateOf(settings.previewFont) }
     var pageWidthCh by remember { mutableStateOf(settings.pageWidthCh) }
     var startupMode by remember { mutableStateOf(settings.startupMode) }
+    // TSV-table compatibility: live here so the dialog edits them like the
+    // other settings, and travel to the preview as per-render options (a
+    // change re-pushes the document — no page reload needed).
+    var tsvTables by remember { mutableStateOf(settings.tsvTables) }
+    var tsvMinRows by remember { mutableStateOf(settings.tsvMinRows) }
+    var tsvMinCols by remember { mutableStateOf(settings.tsvMinCols) }
     // The line-wrap standard is baked into the layout viewport at page load
     // (preview.html boot script), so changing it — or the font it is measured
     // in — reloads the page. The WebView itself stays alive (no black flash).
@@ -457,6 +463,9 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                         appSettings = settings,
                         visible = mode == Mode.Preview,
                         search = previewSearch,
+                        tsvEnabled = tsvTables,
+                        tsvMinRows = tsvMinRows,
+                        tsvMinCols = tsvMinCols,
                         modifier = Modifier.fillMaxSize(),
                     )
                     if (mode == Mode.Edit) {
@@ -510,6 +519,9 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                 editorFont = editorFont,
                 previewFont = previewFont,
                 pageWidthCh = pageWidthCh,
+                tsvTables = tsvTables,
+                tsvMinRows = tsvMinRows,
+                tsvMinCols = tsvMinCols,
                 onTheme = { themeMode = it; settings.theme = it },
                 onEditorSize = { editorFontSize = it; settings.editorFontSize = it },
                 onEditorFont = { editorFont = it; settings.editorFont = it },
@@ -521,6 +533,9 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                     pageWidthCh = it; settings.pageWidthCh = it
                     previewReloadKey++ // viewport is locked at load time
                 },
+                onTsvTables = { tsvTables = it; settings.tsvTables = it },
+                onTsvMinRows = { tsvMinRows = it; settings.tsvMinRows = it },
+                onTsvMinCols = { tsvMinCols = it; settings.tsvMinCols = it },
                 startupMode = startupMode,
                 onStartupMode = { startupMode = it; settings.startupMode = it },
                 onDismiss = { showSettings = false },

@@ -384,7 +384,8 @@ const DISP = 'katex-display';
 }
 {
   // A TSV block glued to prose forms its own block (blank lines inserted).
-  const r = renderMarkdown('prose line\nh1\th2\th3\nd1\td2\td3\nafter text');
+  // Explicit minRows=2: also pins the knob (default is 3).
+  const r = renderMarkdown('prose line\nh1\th2\th3\nd1\td2\td3\nafter text', { tsvMinRows: 2 });
   check('TSV block glued to prose: table separated on both sides',
     (r.html.match(/<table>/g) || []).length === 1 &&
       r.html.includes('<p>prose line</p>') && r.html.includes('<p>after text</p>'), r.html);
@@ -396,14 +397,57 @@ const DISP = 'katex-display';
     (r.html.match(/<table>/g) || []).length === 1 && (r.html.match(/<th>/g) || []).length === 2, r.html);
 }
 {
-  // Ragged rows are padded to the run's widest row.
-  const r = renderMarkdown('a\tb\tc\n1\t2');
+  // Ragged rows are padded to the run's widest row (minRows=2 knob pinned).
+  const r = renderMarkdown('a\tb\tc\n1\t2', { tsvMinRows: 2 });
   check('ragged TSV row padded to header width', (r.html.match(/<td>/g) || []).length === 3, r.html);
 }
 {
   // A literal pipe inside a cell is escaped, not treated as a column break.
-  const r = renderMarkdown('a\tb\nx\ty|z');
+  const r = renderMarkdown('a\tb\nx\ty|z', { tsvMinRows: 2 });
   check('pipe inside a TSV cell escapes to a literal |', r.html.includes('<td>y|z</td>'), r.html);
+}
+
+// 18. TSV threshold knobs (Settings dialog -> hostUpdate opts -> pipeline).
+//     Defaults: enabled, minRows 3, minCols 2 (>= 1 tab).
+{
+  const two = 'h1\th2\nd1\td2';
+  const three = 'h1\th2\nd1\td2\nd3\td4';
+  const r2 = renderMarkdown(two);
+  check('default minRows=3: 2-row TSV block stays prose',
+    (r2.html.match(/<table>/g) || []).length === 0, r2.html);
+  const r3 = renderMarkdown(three);
+  check('default minRows=3: 3-row TSV block becomes a table',
+    (r3.html.match(/<table>/g) || []).length === 1, r3.html.slice(0, 200));
+  const rk = renderMarkdown(two, { tsvMinRows: 2 });
+  check('tsvMinRows=2 converts a 2-row block',
+    (rk.html.match(/<table>/g) || []).length === 1, rk.html.slice(0, 200));
+}
+{
+  const two = 'a\tb\nx\ty\np\tq'; // 3 rows, only 2 cells per line
+  const rc = renderMarkdown(two, { tsvMinCols: 3 });
+  check('tsvMinCols=3 rejects 2-column rows',
+    (rc.html.match(/<table>/g) || []).length === 0, rc.html);
+  const rcDefault = renderMarkdown(two);
+  check('default minCols=2 accepts the same block',
+    (rcDefault.html.match(/<table>/g) || []).length === 1, rcDefault.html.slice(0, 200));
+  const c3 = 'a\tb\tc\td\nx\ty\tz\tw\np\tq\tr\ts';
+  const rk = renderMarkdown(c3, { tsvMinCols: 3 });
+  check('tsvMinCols=3 accepts 3+-column rows',
+    (rk.html.match(/<table>/g) || []).length === 1 && (rk.html.match(/<th>/g) || []).length === 4, rk.html.slice(0, 200));
+}
+{
+  const r = renderMarkdown('h1\th2\nd1\td2\nd3\td4', { tsvTables: false });
+  check('tsvTables=false disables conversion',
+    (r.html.match(/<table>/g) || []).length === 0, r.html);
+  // End-to-end through the bridge: hostUpdate forwards the options.
+  previewEl.innerHTML = '';
+  ctx.MathMD.hostUpdate('h1\th2\nd1\td2\nd3\td4', { tsvTables: false });
+  check('hostUpdate forwards tsvTables=false',
+    (String(previewEl.innerHTML).match(/<table>/g) || []).length === 0, String(previewEl.innerHTML).slice(0, 200));
+  previewEl.innerHTML = '';
+  ctx.MathMD.hostUpdate('h1\th2\nd1\td2\nd3\td4', { tsvMinRows: 3, tsvMinCols: 2 });
+  check('hostUpdate forwards thresholds (defaults convert)',
+    (String(previewEl.innerHTML).match(/<table>/g) || []).length === 1, String(previewEl.innerHTML).slice(0, 200));
 }
 
 // ---- report ----

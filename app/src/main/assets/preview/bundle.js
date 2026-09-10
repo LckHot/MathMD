@@ -197,10 +197,15 @@
   }
 
   // tools/preview-src/src/tsvtables.ts
-  function isTsvLine(line) {
-    return line.indexOf("	") !== -1;
+  var DEFAULTS = { minRows: 3, minCols: 2 };
+  function clamp(value, fallback) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+    return Math.max(2, Math.floor(value));
   }
-  function convertTsvTables(text) {
+  function convertTsvTables(text, opts) {
+    const minRows = clamp(opts?.minRows, DEFAULTS.minRows);
+    const minCols = clamp(opts?.minCols, DEFAULTS.minCols);
+    const isTsvLine = (line) => line.indexOf("	") !== -1 && line.split("	").length >= minCols;
     const lines = text.split("\n");
     const out = [];
     let i = 0;
@@ -211,7 +216,7 @@
         continue;
       }
       const paras = [];
-      let cols = 1;
+      let cols = minCols;
       let end = i;
       for (; ; ) {
         const rows = [];
@@ -231,7 +236,7 @@
         break;
       }
       const totalRows = paras.reduce((s, p) => s + p.rows.length, 0);
-      if (totalRows < 2) {
+      if (totalRows < minRows) {
         for (let k = i; k < end; k++) out.push(lines[k]);
         i = end;
         continue;
@@ -476,7 +481,7 @@
     const salt = opts.salt ?? "K7";
     const errors = [];
     const prot = protectMath(source, salt);
-    const mdSource = convertTsvTables(prot.text);
+    const mdSource = opts.tsvTables ?? true ? convertTsvTables(prot.text, { minRows: opts.tsvMinRows, minCols: opts.tsvMinCols }) : prot.text;
     const md = v.markdownit({ html: false, linkify: true });
     md.use(markdownItCjkFriendlyPlugin);
     let html = md.render(mdSource);
@@ -680,7 +685,12 @@
       if (opts) applyHostOptions(opts);
       clearFind();
       invalidateFindIndex();
-      const result = renderMarkdown(markdown, { salt: randomSalt() });
+      const result = renderMarkdown(markdown, {
+        salt: randomSalt(),
+        tsvTables: opts?.tsvTables,
+        tsvMinRows: opts?.tsvMinRows,
+        tsvMinCols: opts?.tsvMinCols
+      });
       target.innerHTML = result.html;
       postRender(target);
       if (result.errors.length > 0) {

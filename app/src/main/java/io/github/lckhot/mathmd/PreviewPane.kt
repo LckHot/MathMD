@@ -56,6 +56,12 @@ internal fun PreviewPane(
     appSettings: Settings,
     visible: Boolean,
     search: SearchSpec? = null,
+    // TSV-table compatibility thresholds (Settings dialog). Render-time
+    // options, not boot options: changing them only changes the pushed
+    // options JSON, so the change gate re-renders — no page reload.
+    tsvEnabled: Boolean = true,
+    tsvMinRows: Int = 3,
+    tsvMinCols: Int = 2,
     modifier: Modifier = Modifier,
 ) {
     val state = remember { PreviewState() }
@@ -135,7 +141,7 @@ internal fun PreviewPane(
             },
             update = { view ->
                 val st = view.tag as PreviewState
-                val options = previewOptionsJson(appDark, fontName)
+                val options = previewOptionsJson(appDark, fontName, tsvEnabled, tsvMinRows, tsvMinCols)
                 st.latestMarkdown = source
                 st.latestOptions = options
                 // CHANGE GATE (blind-audit HIGH): push only when the payload
@@ -184,9 +190,18 @@ internal fun cssFontFamily(name: String): String? = when {
 }
 
 /** JSON options object passed to MathMD.hostUpdate. */
-private fun previewOptionsJson(appDark: Boolean, fontName: String): String {
+private fun previewOptionsJson(
+    appDark: Boolean,
+    fontName: String,
+    tsvEnabled: Boolean,
+    tsvMinRows: Int,
+    tsvMinCols: Int,
+): String {
     val o = JSONObject()
         .put("theme", if (appDark) "dark" else "light")
+        .put("tsvTables", tsvEnabled)
+        .put("tsvMinRows", tsvMinRows)
+        .put("tsvMinCols", tsvMinCols)
     cssFontFamily(fontName)?.let { o.put("fontFamily", it) }
     return o.toString()
 }

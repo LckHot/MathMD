@@ -34,6 +34,13 @@ export interface RenderOptions {
   salt?: string;
   /** Passed to KaTeX (default false: bad formulas render red, not throw). */
   throwOnError?: boolean;
+  /** ChatGPT-style TSV block → table conversion (default true).
+   *  App plumbing: Settings dialog -> previewOptionsJson -> hostUpdate. */
+  tsvTables?: boolean;
+  /** Minimum consecutive TSV lines that form a table (default 3, floor 2). */
+  tsvMinRows?: number;
+  /** Minimum cells (tab-separated) per line (default 2, floor 2). */
+  tsvMinCols?: number;
 }
 
 export interface MathError {
@@ -84,7 +91,11 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   // ChatGPT-style tab-separated blocks become GFM pipe tables BEFORE the
   // parser sees them (and AFTER protection: the text here carries math/code
   // placeholders, so cell splitting can never touch a formula or code).
-  const mdSource = convertTsvTables(prot.text);
+  // Thresholds come from the app's Settings dialog; clamping lives in
+  // convertTsvTables.
+  const mdSource = (opts.tsvTables ?? true)
+    ? convertTsvTables(prot.text, { minRows: opts.tsvMinRows, minCols: opts.tsvMinCols })
+    : prot.text;
   const md = v.markdownit({ html: false, linkify: true });
   md.use(cjkFriendly);
   let html = md.render(mdSource);

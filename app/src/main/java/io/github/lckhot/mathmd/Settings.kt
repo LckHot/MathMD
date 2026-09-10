@@ -31,4 +31,22 @@ internal class Settings(context: Context) {
     var startupMode: String
         get() = prefs.getString("startupMode", "edit") ?: "edit"
         set(v) = prefs.edit().putString("startupMode", v).apply()
+
+    // TSV-table compatibility: ChatGPT-style tab-separated blocks render as
+    // real tables. Threshold ranges are clamped in the SettingsDialog; the
+    // values travel to the WebView per render via previewOptionsJson.
+
+    var tsvTables: Boolean
+        get() = prefs.getBoolean("tsvTables", true)
+        set(v) = prefs.edit().putBoolean("tsvTables", v).apply()
+
+    /** Minimum consecutive TSV lines that form a table (dialog clamps 2..20). */
+    var tsvMinRows: Int
+        get() = prefs.getInt("tsvMinRows", 3)
+        set(v) = prefs.edit().putInt("tsvMinRows", v).apply()
+
+    /** Minimum tab-separated cells per line (dialog clamps 2..10). */
+    var tsvMinCols: Int
+        get() = prefs.getInt("tsvMinCols", 2)
+        set(v) = prefs.edit().putInt("tsvMinCols", v).apply()
 }
