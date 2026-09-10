@@ -84,15 +84,18 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   let html = md.render(prot.text);
 
   // ---- restore code constructs verbatim ----
-  // Fence/indented tokens sit INSIDE markdown-it's <pre><code>, so they are
-  // restored as plain escaped text (re-wrapping would nest <code> tags);
-  // indented-block lines keep their original 4-space/tab marker, which
-  // markdown-it stripped from the token line only — strip it per line here.
-  // Inline-span tokens sit bare in a paragraph and get wrapped in <code>.
+  // Dispatch on the segment's construct (never sniff the raw text: a fence
+  // interior indented 4 spaces — meaningful in Python etc. — would match the
+  // indented-block heuristic and lose that indent). Fence/indented tokens
+  // sit INSIDE markdown-it's <pre><code>, so they are restored as plain
+  // escaped text (re-wrapping would nest <code> tags); indented-block lines
+  // keep their original 4-space/tab marker, which markdown-it stripped from
+  // the token line only — strip it per line here. Inline-span tokens sit
+  // bare in a paragraph and get wrapped in <code>.
   html = html.replace(new RegExp(CODE_TOKEN_SOURCE, 'g'), (tok) => {
     const seg = prot.code.find((s) => s.token === tok);
     if (!seg) return tok; // salt-mismatched literal token-shaped text: keep verbatim
-    if (seg.raw.startsWith('`')) {
+    if (seg.construct === 'span') {
       const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
       let body = m ? m[2] : seg.raw;
       // CommonMark: strip one leading+trailing space if both present
@@ -101,11 +104,8 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
       }
       return `<code>${esc(body)}</code>`;
     }
-    const isIndented = /^ {4}|^\t/.test(seg.raw);
-    const body = isIndented
-      ? seg.raw.replace(/^ {4}/gm, '').replace(/^\t/gm, '')
-      : seg.raw;
-    return esc(body);
+    if (seg.construct === 'fence') return esc(seg.raw);
+    return esc(seg.raw.replace(/^ {4}/gm, '').replace(/^\t/gm, ''));
   });
 
   // ---- restore math through KaTeX ----

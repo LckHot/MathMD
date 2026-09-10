@@ -64,9 +64,16 @@ internal fun EditorPane(
     // state -> snapshotFlow -> parent -> back here, so only a text that did
     // NOT come from this field (open/reload) may replace the buffer.
     var lastEmitted by remember { mutableStateOf(text) }
+    // The buffer as a plain String, updated only when the field's text flow
+    // emits; the search scan below keys its memoization on this. Reading
+    // state.text.toString() directly in composition instead re-copied the
+    // whole buffer on every unrelated recomposition (search tick, mode
+    // flip, menu open) — the same pattern the lowercase copy below avoids.
+    var currentText by remember { mutableStateOf(text) }
     LaunchedEffect(state) {
         snapshotFlow { state.text.toString() }.collect {
             lastEmitted = it
+            currentText = it
             onText(it)
         }
     }
@@ -82,7 +89,6 @@ internal fun EditorPane(
     // side built for its find index. Content-equal String keys, so edits
     // and query changes still recompute exactly once.
     val query = search?.query.orEmpty()
-    val currentText = state.text.toString()
     val ranges = remember(currentText, query) { matchRanges(currentText, query) }
     val active = if (search == null || ranges.isEmpty()) -1
     else search.index.coerceIn(0, ranges.lastIndex)

@@ -90,7 +90,7 @@
         q = qeol + 1;
       }
       const token = codeToken();
-      code.push({ token, kind: "code", raw: source.slice(bodyStart, bodyEnd) });
+      code.push({ token, kind: "code", construct: "fence", raw: source.slice(bodyStart, bodyEnd) });
       out += line;
       if (eol < n) out += "\n";
       out += token;
@@ -139,7 +139,7 @@
         break;
       }
       const token = codeToken();
-      code.push({ token, kind: "code", raw: lines.join("\n") });
+      code.push({ token, kind: "code", construct: "indented", raw: lines.join("\n") });
       out += "    " + token + (endedAtEof ? "" : "\n");
       return q;
     };
@@ -156,7 +156,7 @@
         while (idx + k2 < n && source[idx + k2] === "`") k2++;
         if (k2 === k) {
           const token = codeToken();
-          code.push({ token, kind: "code", raw: source.slice(p, idx + k2) });
+          code.push({ token, kind: "code", construct: "span", raw: source.slice(p, idx + k2) });
           out += token;
           return idx + k2;
         }
@@ -419,17 +419,16 @@
     html = html.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok) => {
       const seg = prot.code.find((s) => s.token === tok);
       if (!seg) return tok;
-      if (seg.raw.startsWith("`")) {
+      if (seg.construct === "span") {
         const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
-        let body2 = m ? m[2] : seg.raw;
-        if (body2.startsWith(" ") && body2.endsWith(" ") && body2.length >= 2) {
-          body2 = body2.slice(1, -1);
+        let body = m ? m[2] : seg.raw;
+        if (body.startsWith(" ") && body.endsWith(" ") && body.length >= 2) {
+          body = body.slice(1, -1);
         }
-        return `<code>${esc(body2)}</code>`;
+        return `<code>${esc(body)}</code>`;
       }
-      const isIndented = /^ {4}|^\t/.test(seg.raw);
-      const body = isIndented ? seg.raw.replace(/^ {4}/gm, "").replace(/^\t/gm, "") : seg.raw;
-      return esc(body);
+      if (seg.construct === "fence") return esc(seg.raw);
+      return esc(seg.raw.replace(/^ {4}/gm, "").replace(/^\t/gm, ""));
     });
     html = html.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok) => {
       const seg = prot.math.find((s) => s.token === tok);

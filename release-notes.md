@@ -26,6 +26,8 @@ What's new since v1.1.0
 - Internal: document IO extracted into a single-threaded service;
   open/save flows hardened (save snapshots, ordered opens).
 
+**Downloads**
+
 - **app-release.apk** — signed release build (recommended)
 - **app-debug.apk** — debug build
 

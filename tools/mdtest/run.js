@@ -324,6 +324,22 @@ const DISP = 'katex-display';
   );
 }
 
+// 16. Fence interior indentation survives restore (code-review R2): the
+//     restore pass dispatches on the segment's construct, so a fence whose
+//     interior is 4-space/tab-indented (syntactically meaningful in Python)
+//     keeps that indent; only genuine indented blocks lose their marker.
+{
+  const r = renderMarkdown('```\n    line one keeps indent?\n    line two also\n```');
+  check('fence: 4-space-indented interior preserved',
+    r.html.includes('<pre><code>    line one keeps indent?\n    line two also'), r.html);
+  const t = renderMarkdown('```\n\tline one tab\n\tline two tab\n```');
+  check('fence: tab-indented interior preserved',
+    t.html.includes('<pre><code>\tline one tab\n\tline two tab'), t.html);
+  const ind = renderMarkdown('text\n\n    $x_i$ indented\n\nmore');
+  check('indented block: 4-space marker still stripped',
+    ind.html.includes('<pre><code>$x_i$ indented') && !/<code><code>/.test(ind.html), ind.html);
+}
+
 // ---- report ----
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) {

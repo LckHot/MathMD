@@ -88,7 +88,13 @@ class MainActivity : ComponentActivity() {
 /** Editing modes: source editor and rendered preview. */
 private enum class Mode { Edit, Preview }
 
-/** MIME types offered by the Open document picker. */
+/** MIME types offered by the Open document picker.
+ *
+ *  Deliberately wider than the manifest's VIEW intent-filter, which takes
+ *  only the text/* types: adding application/octet-stream there would offer
+ *  MathMD as a handler for EVERY unknown-type file system-wide. The
+ *  asymmetry is intended — in-app users can still pick such files here, and
+ *  they load as text or fail with a toast. */
 private val OPEN_MIMES = arrayOf(
     "text/markdown", "text/x-markdown", "text/plain", "application/octet-stream",
 )
@@ -170,28 +176,33 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
-        if (uri != null) {
-            if (openInNewWindow) {
-                // "Keep this instance, open in a new window": re-enter the app
-                // via ACTION_VIEW — documentLaunchMode gives the file its own
-                // instance (or focuses the one already showing it).
-                openInNewWindow = false
-                val view = Intent(Intent.ACTION_VIEW, uri).apply {
-                    setPackage(context.packageName)
-                    addFlags(
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                            Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                    )
-                }
-                try {
-                    context.startActivity(view)
-                } catch (e: Exception) {
-                    toast("Could not open a new window: ${e.message}")
-                    loadFromUri(uri) // fallback: open in this instance
-                }
-            } else {
-                loadFromUri(uri)
+        // A follow-up flag set before a launcher must be cleared on EVERY
+        // terminal path of that launcher — cancel included — or it fires on
+        // a later, unrelated action (review R1).
+        if (uri == null) {
+            openInNewWindow = false
+            return@rememberLauncherForActivityResult
+        }
+        if (openInNewWindow) {
+            // "Keep this instance, open in a new window": re-enter the app
+            // via ACTION_VIEW — documentLaunchMode gives the file its own
+            // instance (or focuses the one already showing it).
+            openInNewWindow = false
+            val view = Intent(Intent.ACTION_VIEW, uri).apply {
+                setPackage(context.packageName)
+                addFlags(
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                        Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
+                )
             }
+            try {
+                context.startActivity(view)
+            } catch (e: Exception) {
+                toast("Could not open a new window: ${e.message}")
+                loadFromUri(uri) // fallback: open in this instance
+            }
+        } else {
+            loadFromUri(uri)
         }
     }
 
@@ -218,17 +229,22 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
-        if (uri != null) {
-            val snapshot = text
-            documentIo.resolveName(uri) { name ->
-                doc.uri = uri
-                doc.name = name
-                val followUp = pendingActionAfterSave
-                pendingActionAfterSave = null
-                documentIo.writeTo(uri, snapshot) {
-                    doc.savedText = snapshot
-                    if (followUp != null) afterGuardAction(followUp)
-                }
+        // Same cancel-path invariant as openLauncher (review R1): a stale
+        // pendingActionAfterSave would fire the guard's follow-up (e.g. the
+        // Open picker) after an ordinary save.
+        if (uri == null) {
+            pendingActionAfterSave = null
+            return@rememberLauncherForActivityResult
+        }
+        val snapshot = text
+        documentIo.resolveName(uri) { name ->
+            doc.uri = uri
+            doc.name = name
+            val followUp = pendingActionAfterSave
+            pendingActionAfterSave = null
+            documentIo.writeTo(uri, snapshot) {
+                doc.savedText = snapshot
+                if (followUp != null) afterGuardAction(followUp)
             }
         }
     }

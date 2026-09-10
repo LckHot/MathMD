@@ -45,6 +45,13 @@ export interface CodeSegment {
   readonly token: string;
   readonly kind: 'code';
   /**
+   * Which construct produced this segment. The restore pass dispatches on
+   * this instead of sniffing `raw`: a fence whose interior is 4-space- or
+   * tab-indented (syntactically meaningful in Python etc.) would otherwise
+   * match the indented-block sniff and have that indent stripped.
+   */
+  readonly construct: 'fence' | 'indented' | 'span';
+  /**
    * For fences: the interior lines. For indented blocks: the indented lines.
    * For inline spans: the full original text including backtick delimiters.
    */
@@ -177,7 +184,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     }
 
     const token = codeToken();
-    code.push({ token, kind: 'code', raw: source.slice(bodyStart, bodyEnd) });
+    code.push({ token, kind: 'code', construct: 'fence', raw: source.slice(bodyStart, bodyEnd) });
     out += line;
     if (eol < n) out += '\n';
     out += token;
@@ -233,7 +240,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
     }
 
     const token = codeToken();
-    code.push({ token, kind: 'code', raw: lines.join('\n') });
+    code.push({ token, kind: 'code', construct: 'indented', raw: lines.join('\n') });
     out += '    ' + token + (endedAtEof ? '' : '\n');
     return q;
   };
@@ -253,7 +260,7 @@ export function protectMath(source: string, salt = 'K7'): Protection {
       while (idx + k2 < n && source[idx + k2] === '`') k2++;
       if (k2 === k) {
         const token = codeToken();
-        code.push({ token, kind: 'code', raw: source.slice(p, idx + k2) });
+        code.push({ token, kind: 'code', construct: 'span', raw: source.slice(p, idx + k2) });
         out += token;
         return idx + k2;
       }

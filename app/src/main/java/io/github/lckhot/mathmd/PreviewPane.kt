@@ -164,14 +164,23 @@ internal fun PreviewPane(
     }
 }
 
-/** CSS font-family for a platform family name (null = bundle default). */
-internal fun cssFontFamily(name: String): String? = when (name) {
-    "default" -> null
-    "sans-serif" -> "sans-serif"
-    "serif" -> "serif"
-    "monospace" -> "monospace"
-    "cursive" -> "cursive"
-    else -> "'$name', sans-serif"
+/**
+ * CSS font-family for a platform family name (null = bundle default).
+ *
+ * The name comes from persisted user settings, so it is validated against a
+ * conservative whitelist before being interpolated: a value carrying quotes,
+ * semicolons or braces could break out of the CSS string here and in
+ * preview.html's boot-script probe. The settings dialog only offers the
+ * closed FONT_FAMILIES list (all [a-z-]); anything outside the whitelist
+ * falls back to the bundle default — a data-level guarantee, not a UI-level
+ * one (review R7).
+ */
+internal fun cssFontFamily(name: String): String? = when {
+    name == "default" -> null
+    name == "sans-serif" || name == "serif" || name == "monospace" || name == "cursive" -> name
+    name.isNotEmpty() && name.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == ' ' } ->
+        "'$name', sans-serif"
+    else -> null
 }
 
 /** JSON options object passed to MathMD.hostUpdate. */
