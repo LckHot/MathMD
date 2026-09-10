@@ -91,8 +91,8 @@ private enum class Mode { Edit, Preview }
 /** MIME types offered by the Open document picker.
  *
  *  Deliberately wider than the manifest's VIEW intent-filter, which takes
- *  only the text/* types: adding application/octet-stream there would offer
- *  MathMD as a handler for EVERY unknown-type file system-wide. The
+ *  only the text MIME types: adding application/octet-stream there would
+ *  offer MathMD as a handler for EVERY unknown-type file system-wide. The
  *  asymmetry is intended — in-app users can still pick such files here, and
  *  they load as text or fail with a toast. */
 private val OPEN_MIMES = arrayOf(
