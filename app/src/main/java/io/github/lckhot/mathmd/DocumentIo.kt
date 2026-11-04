@@ -32,7 +32,14 @@ internal class DocumentIo(
     /** Async display-name lookup (provider query must not run on main). */
     fun resolveName(uri: Uri, onDone: (String) -> Unit) {
         io.execute {
-            val name = displayName(uri)
+            // A provider can grant a writable URI while rejecting its metadata
+            // query. That must not silently abort Save As or strand a guarded
+            // follow-up; the URI is still usable with a fallback display name.
+            val name = try {
+                displayName(uri)
+            } catch (_: Exception) {
+                "untitled.md"
+            }
             onUi { onDone(name) }
         }
     }
