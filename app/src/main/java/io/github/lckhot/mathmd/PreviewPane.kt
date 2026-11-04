@@ -115,6 +115,16 @@ internal fun PreviewPane(
                             pushDocument(view, st.latestMarkdown, st.latestOptions)
                             st.pushedMarkdown = st.latestMarkdown
                             st.pushedOptions = st.latestOptions
+                            // hostUpdate clears all highlights. Run the current
+                            // query after the initial page load too; there may
+                            // be no further Compose update after this callback.
+                            st.lastSearchTick = -1
+                            if (search != null && visible) {
+                                st.lastSearchTick = search.tick
+                                findInPreview(view, search.query, search.index) { t, a ->
+                                    search.onResult(t, a)
+                                }
+                            }
                         }
 
                         override fun shouldOverrideUrlLoading(
@@ -157,6 +167,10 @@ internal fun PreviewPane(
                     pushDocument(view, source, options)
                     st.pushedMarkdown = source
                     st.pushedOptions = options
+                    // Every real render invalidates the find index and all
+                    // painted ranges, even when the query/tick is unchanged
+                    // (new document, theme or TSV options).
+                    st.lastSearchTick = -1
                 }
                 // Search request: run when a fresh tick arrives while the
                 // page is visible and ready (mode flip bumps the tick from

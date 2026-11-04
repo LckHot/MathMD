@@ -174,6 +174,8 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         doc.name = name
         doc.savedText = content
         text = content
+        // A document replacement invalidates the previous pane's matches.
+        if (searchOpen) requestSearch()
         // NOTE: mode is NOT touched here — it is governed solely by the
         // startup-mode preference (set at composition and for external
         // opens). Forcing Edit here overrides the pref.
@@ -219,6 +221,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         doc.name = "untitled.md"
         doc.savedText = ""
         text = ""
+        if (searchOpen) requestSearch()
         // mode is NOT touched here either — same rule as loadFromUri.
     }
 
