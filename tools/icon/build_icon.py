@@ -51,20 +51,22 @@ def glyph_group(d, fill, tx, ty, s):
 def main():
     sans = TTFont(ADVENTOR_BOLD)
 
-    # Line geometry: content box 28..80 on both axes — equal 28dp margins on
-    # all four sides of the 108dp canvas (safe from the rounded-corner mask).
+    # Preserve the original composition; only strengthen small-size legibility.
     X0, X1 = 28.0, 80.0
     ROWS = (28.0, 38.0, 48.0, 58.0)
+    WORD_CAP_HEIGHT = 13.0
+    WORD_BASELINE = 81.0  # 13dp cap height keeps the original 68dp wordmark top.
+    LINE_WIDTH = 2.8
 
     # ---- wordmark "MathD": M and D blue (MD = markdown embedded), ath white ----
     colors = {"M": BLUE, "a": LINE, "t": LINE, "h": LINE, "D": BLUE}
     word = [glyph_path(sans, c) for c in "MathD"]
     cap = max(b[3] for _, _, b in word)
-    word_scale = 12.0 / cap
+    word_scale = WORD_CAP_HEIGHT / cap
     advances = [w for _, w, _ in word]
     total_w = sum(advances) * word_scale
     x = (108.0 - total_w) / 2.0
-    baseline = 80.0
+    baseline = WORD_BASELINE
     word_parts = []
     for (d, w, _b), ch in zip(word, "MathD"):
         word_parts.append(glyph_group(d, colors[ch], x, baseline, word_scale))
@@ -72,7 +74,7 @@ def main():
 
     # ---- clean white text lines (round caps), no decorations ----
     def hline(y, x0, x1):
-        return (f'<path stroke="{LINE}" stroke-width="2.6" stroke-linecap="round" '
+        return (f'<path stroke="{LINE}" stroke-width="{LINE_WIDTH}" stroke-linecap="round" '
                 f'd="M{x0} {y}h{x1 - x0}"/>')
 
     parts = [
