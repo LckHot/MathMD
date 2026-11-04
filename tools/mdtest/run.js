@@ -450,6 +450,48 @@ const DISP = 'katex-display';
     (String(previewEl.innerHTML).match(/<table>/g) || []).length === 1, String(previewEl.innerHTML).slice(0, 200));
 }
 
+// 19. Placeholder restore must never inject markup inside HTML attributes.
+//     Math/code in link destinations and image alt text stays literal; math in
+//     the link's visible text still renders normally.
+{
+  const r = renderMarkdown('[x](https://example.com/$a$)');
+  check('math in link destination stays literal inside href',
+    r.html.includes('href="https://example.com/$a$"') &&
+      !r.html.includes('href="https://example.com/<span'), r.html);
+}
+{
+  const r = renderMarkdown('![$a$](img.png)');
+  check('math in image alt stays literal inside attribute',
+    r.html.includes('alt="$a$"') && !r.html.includes('alt="<span'), r.html);
+}
+{
+  const r = renderMarkdown('[x $a$](https://example.com)');
+  check('math in visible link text still renders',
+    r.html.includes('href="https://example.com"') && r.html.includes(K), r.html);
+}
+{
+  const r = renderMarkdown('[x](https://example.com/`a`)');
+  check('code span in link destination cannot inject a code element',
+    !r.html.includes('<code>') && !r.html.includes('href="https://example.com/<code>'), r.html);
+}
+
+// 20. Inline code spans follow CommonMark whitespace and block-boundary rules.
+{
+  const r = renderMarkdown('`  `');
+  check('code span consisting only of spaces is preserved',
+    r.html.includes('<code>  </code>'), r.html);
+}
+{
+  const r = renderMarkdown('`a\nb`');
+  check('code span line ending normalizes to one space',
+    r.html.includes('<code>a b</code>'), r.html);
+}
+{
+  const r = renderMarkdown('before\n\n`a\n\nb`\n\nafter');
+  check('code span cannot cross a blank-line block boundary',
+    !r.html.includes('<code>') && r.html.includes('<p>b`</p>'), r.html);
+}
+
 // ---- report ----
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) {

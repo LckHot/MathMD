@@ -100,6 +100,13 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   md.use(cjkFriendly);
   let html = md.render(mdSource);
 
+  // A placeholder can land inside an HTML attribute (link destination, image
+  // alt/title). Restoring KaTeX or <code> markup there would break the tag.
+  // markdown-it has already escaped literal '<'/'>' in attribute values, so
+  // the nearest bracket pair reliably distinguishes tags from text nodes.
+  const insideTag = (offset: number): boolean =>
+    html.lastIndexOf('<', offset) > html.lastIndexOf('>', offset);
+
   // ---- restore code constructs verbatim ----
   // Dispatch on the segment's construct (never sniff the raw text: a fence
   // interior indented 4 spaces — meaningful in Python etc. — would match the
@@ -109,14 +116,16 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   // keep their original 4-space/tab marker, which markdown-it stripped from
   // the token line only — strip it per line here. Inline-span tokens sit
   // bare in a paragraph and get wrapped in <code>.
-  html = html.replace(new RegExp(CODE_TOKEN_SOURCE, 'g'), (tok) => {
+  html = html.replace(new RegExp(CODE_TOKEN_SOURCE, 'g'), (tok, offset: number) => {
     const seg = prot.code.find((s) => s.token === tok);
     if (!seg) return tok; // salt-mismatched literal token-shaped text: keep verbatim
+    if (insideTag(offset)) return esc(seg.raw);
     if (seg.construct === 'span') {
       const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
-      let body = m ? m[2] : seg.raw;
-      // CommonMark: strip one leading+trailing space if both present
-      if (body.startsWith(' ') && body.endsWith(' ') && body.length >= 2) {
+      let body = (m ? m[2] : seg.raw).replace(/\r\n?|\n/g, ' ');
+      // CommonMark: strip one leading+trailing space only when the body is
+      // not entirely spaces; line endings became spaces above.
+      if (body.startsWith(' ') && body.endsWith(' ') && /[^ ]/.test(body)) {
         body = body.slice(1, -1);
       }
       return `<code>${esc(body)}</code>`;
@@ -126,9 +135,10 @@ export function renderMarkdown(source: string, opts: RenderOptions = {}): Render
   });
 
   // ---- restore math through KaTeX ----
-  html = html.replace(new RegExp(MATH_TOKEN_SOURCE, 'g'), (tok) => {
+  html = html.replace(new RegExp(MATH_TOKEN_SOURCE, 'g'), (tok, offset: number) => {
     const seg = prot.math.find((s) => s.token === tok);
     if (!seg) return tok;
+    if (insideTag(offset)) return esc(seg.raw);
     try {
       return v.katex!.renderToString(seg.tex, {
         displayMode: seg.display,

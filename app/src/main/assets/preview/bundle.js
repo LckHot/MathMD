@@ -34,7 +34,13 @@
     };
     const pushMath = (p, openLen, closeIdx, closeLen, display) => {
       const token = mathToken();
-      math.push({ token, kind: "math", display, tex: source.slice(p + openLen, closeIdx) });
+      math.push({
+        token,
+        kind: "math",
+        display,
+        tex: source.slice(p + openLen, closeIdx),
+        raw: source.slice(p, closeIdx + closeLen)
+      });
       out += token;
       return closeIdx + closeLen;
     };
@@ -154,6 +160,7 @@
         if (idx === -1) return -1;
         let k2 = 1;
         while (idx + k2 < n && source[idx + k2] === "`") k2++;
+        if (/\r?\n[ \t\r]*\r?\n/.test(source.slice(p, idx))) return -1;
         if (k2 === k) {
           const token = codeToken();
           code.push({ token, kind: "code", construct: "span", raw: source.slice(p, idx + k2) });
@@ -485,13 +492,15 @@
     const md = v.markdownit({ html: false, linkify: true });
     md.use(markdownItCjkFriendlyPlugin);
     let html = md.render(mdSource);
-    html = html.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok) => {
+    const insideTag = (offset) => html.lastIndexOf("<", offset) > html.lastIndexOf(">", offset);
+    html = html.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok, offset) => {
       const seg = prot.code.find((s) => s.token === tok);
       if (!seg) return tok;
+      if (insideTag(offset)) return esc(seg.raw);
       if (seg.construct === "span") {
         const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
-        let body = m ? m[2] : seg.raw;
-        if (body.startsWith(" ") && body.endsWith(" ") && body.length >= 2) {
+        let body = (m ? m[2] : seg.raw).replace(/\r\n?|\n/g, " ");
+        if (body.startsWith(" ") && body.endsWith(" ") && /[^ ]/.test(body)) {
           body = body.slice(1, -1);
         }
         return `<code>${esc(body)}</code>`;
@@ -499,9 +508,10 @@
       if (seg.construct === "fence") return esc(seg.raw);
       return esc(seg.raw.replace(/^ {4}/gm, "").replace(/^\t/gm, ""));
     });
-    html = html.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok) => {
+    html = html.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok, offset) => {
       const seg = prot.math.find((s) => s.token === tok);
       if (!seg) return tok;
+      if (insideTag(offset)) return esc(seg.raw);
       try {
         return v.katex.renderToString(seg.tex, {
           displayMode: seg.display,

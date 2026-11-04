@@ -38,6 +38,8 @@ export interface MathSegment {
   readonly display: boolean;
   /** The TeX source between the delimiters, verbatim. */
   readonly tex: string;
+  /** Full original source including delimiters, for literal attribute restore. */
+  readonly raw: string;
 }
 
 /** A code construct (fence / indented block / inline span), verbatim. */
@@ -119,7 +121,13 @@ export function protectMath(source: string, salt = 'K7'): Protection {
 
   const pushMath = (p: number, openLen: number, closeIdx: number, closeLen: number, display: boolean): number => {
     const token = mathToken();
-    math.push({ token, kind: 'math', display, tex: source.slice(p + openLen, closeIdx) });
+    math.push({
+      token,
+      kind: 'math',
+      display,
+      tex: source.slice(p + openLen, closeIdx),
+      raw: source.slice(p, closeIdx + closeLen),
+    });
     out += token;
     return closeIdx + closeLen;
   };
@@ -258,6 +266,10 @@ export function protectMath(source: string, salt = 'K7'): Protection {
       if (idx === -1) return -1;
       let k2 = 1;
       while (idx + k2 < n && source[idx + k2] === '`') k2++;
+      // Inline parsing never crosses a blank-line block boundary. Without
+      // this guard the pre-parser would merge separate Markdown paragraphs
+      // into one code span that markdown-it itself would never recognize.
+      if (/\r?\n[ \t\r]*\r?\n/.test(source.slice(p, idx))) return -1;
       if (k2 === k) {
         const token = codeToken();
         code.push({ token, kind: 'code', construct: 'span', raw: source.slice(p, idx + k2) });
