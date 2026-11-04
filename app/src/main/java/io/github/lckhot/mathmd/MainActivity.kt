@@ -99,7 +99,7 @@ private val OPEN_MIMES = arrayOf(
     "text/markdown", "text/x-markdown", "text/plain", "application/octet-stream",
 )
 
-private fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode) {
+internal fun isDarkTheme(mode: String, systemDark: Boolean): Boolean = when (mode) {
     "light" -> false
     "dark" -> true
     else -> systemDark

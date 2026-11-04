@@ -32,7 +32,7 @@ private fun editorFontFamily(name: String): FontFamily = when (name) {
 }
 
 /** Case-insensitive all-match ranges of [query] in [text]. */
-private fun matchRanges(text: String, query: String): List<IntRange> {
+internal fun matchRanges(text: String, query: String): List<IntRange> {
     if (query.isEmpty()) return emptyList()
     val t = text.lowercase()
     val q = query.lowercase()

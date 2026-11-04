@@ -45,6 +45,9 @@ jobs:
       - name: Shipped bundle matches TypeScript sources
         run: git diff --exit-code app/src/main/assets/preview/bundle.js
 
+      - name: Kotlin unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
       - name: Build release APK (signed, debuggable=false)
         # Release variant: matches production behavior and ships the same
         # signing key as releases, so rolling builds update over them.

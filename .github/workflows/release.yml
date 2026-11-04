@@ -55,6 +55,9 @@ jobs:
             echo "tag ${GITHUB_REF_NAME} != v${VN} in build.gradle.kts" && exit 1
           fi
 
+      - name: Kotlin unit tests
+        run: ./gradlew :app:testDebugUnitTest --console=plain
+
       - name: Build debug APK
         # Kept as a secondary asset for troubleshooting: it is debug-key
         # signed and debuggable, useful when a release-only failure needs
