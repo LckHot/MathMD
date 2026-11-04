@@ -204,8 +204,9 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
             try {
                 context.startActivity(view)
             } catch (e: Exception) {
+                // The user chose KEEP: never fall back to replacing this dirty
+                // buffer in the current window.
                 toast("Could not open a new window: ${e.message}")
-                loadFromUri(uri) // fallback: open in this instance
             }
         } else {
             loadFromUri(uri)
@@ -301,15 +302,16 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         try {
             context.startActivity(blank)
         } catch (e: Exception) {
+            // As with Open, KEEP must never turn into a destructive fallback.
             toast("Could not open a new window: ${e.message}")
-            newDocument() // fallback: new document in this instance
         }
     }
 
     // Documents opened from outside the app: honor the startup-mode
     // preference. With documentLaunchMode=intoExisting each file gets its
     // own instance; re-shooting the same file lands here via onNewIntent
-    // with a bumped viewRequest, so the reload still happens.
+    // with a bumped viewRequest. A clean buffer reloads (picking up external
+    // edits), but a dirty one is kept rather than silently overwritten.
     //
     // PROCESS RESTORE (blind-audit CRITICAL): after the process is killed
     // and recreated, the original ACTION_VIEW intent is redelivered — but
@@ -320,11 +322,15 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     var restoredViewHandled by remember { mutableStateOf(false) }
     LaunchedEffect(externalUri, viewRequest) {
         if (externalUri != null) {
+            val sameDocument = externalUri == doc.uri
             val wouldClobberRestore =
-                processRestored && !restoredViewHandled && externalUri == doc.uri
-            if (!wouldClobberRestore) {
+                processRestored && !restoredViewHandled && sameDocument
+            val wouldClobberDirty = sameDocument && dirty
+            if (!wouldClobberRestore && !wouldClobberDirty) {
                 mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
                 loadFromUri(externalUri)
+            } else if (wouldClobberDirty && !wouldClobberRestore) {
+                toast("Keeping unsaved changes; reload skipped")
             }
             restoredViewHandled = true
         }
