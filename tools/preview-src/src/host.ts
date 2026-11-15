@@ -8,6 +8,14 @@
  */
 
 import { renderMarkdown } from './render';
+import {
+  foldCaseWithMap,
+  foldedMatchRanges,
+  matchRangesInFolded,
+  alignOwnerMap,
+  foldOperationCount,
+  type Folded,
+} from './casefold';
 
 export interface HostOptions {
   /** 'system' resolves via prefers-color-scheme at apply time. */
@@ -168,14 +176,19 @@ function clearFind(): void {
  * Per-document search index. Measured on the owner's real document (3.5k
  * text nodes, desktop Chromium): the per-call TreeWalker with its per-node
  * ancestor climb was ~6ms of a ~6.5ms warm find — i.e. tens of ms PER
- * KEYSTROKE on a phone, the visible jump lag. Nodes and their LOWERCASED
- * text are cached once per rendered document, so a keystroke degenerates
- * to a pure string scan (like the Kotlin editor side), and a step (same
- * query) reuses the previous ranges wholesale. hostUpdate replaces
- * innerHTML, so it must invalidate the index.
+ * KEYSTROKE on a phone, the visible jump lag. Nodes and their CASE-FOLDED
+ * text (with owner ranges back into the original text, M3) are cached once
+ * per rendered document, so a keystroke degenerates to a pure string scan
+ * (like the Kotlin editor side), and a step (same query) reuses the
+ * previous ranges wholesale. hostUpdate replaces innerHTML, so it must
+ * invalidate the index.
+ *
+ * A node whose fold cannot be aligned (M3 gate) is indexed as null and
+ * contributes no matches — a conservative miss with a one-time console
+ * diagnostic, never a wrong DOM Range.
  */
 let findNodes: Text[] | null = null;
-let findData: string[] = [];
+let findFolded: (Folded | null)[] = [];
 let findNodesRoot: HTMLElement | null = null;
 let findQuery: string | null = null;
 let findRanges: Range[] = [];
@@ -183,7 +196,7 @@ let paintedRanges: Range[] | null = null;
 
 function invalidateFindIndex(): void {
   findNodes = null;
-  findData = [];
+  findFolded = [];
   findNodesRoot = null;
   findQuery = null;
   findRanges = [];
@@ -256,24 +269,34 @@ export function find(query: string, active: number): FindResult {
   // Build the per-document index once; reuse it across keystrokes/steps.
   if (findNodesRoot !== target || findNodes === null) {
     findNodes = textNodesUnder(target);
-    findData = findNodes.map((n) => (n.nodeValue ?? '').toLowerCase());
+    findFolded = findNodes.map((n) => {
+      const f = foldCaseWithMap(n.nodeValue ?? '');
+      if (f === null) {
+        // Conservative miss + diagnostic (M3): never a wrong DOM Range.
+        console.warn('MathMD find: text node could not be case-folded safely; skipped');
+      }
+      return f;
+    });
     findNodesRoot = target;
     findQuery = null;
     findRanges = [];
   }
   const nodes = findNodes;
+  // Query folded ONCE per query change; every node matches against its
+  // CACHED Folded via matchRangesInFolded — no per-node re-folding.
   const q = query.toLowerCase();
   if (findQuery !== q) {
     const ranges: Range[] = [];
     for (let k = 0; k < nodes.length; k++) {
-      const data = findData[k];
-      let i = data.indexOf(q);
-      while (i !== -1) {
+      const folded = findFolded[k];
+      if (folded === null) continue;
+      // Matches are ORIGINAL-text UTF-16 ranges; folded offsets never
+      // reach the DOM (M3).
+      for (const [origStart, origEnd] of matchRangesInFolded(folded, nodes[k].nodeValue ?? '', q)) {
         const r = document.createRange();
-        r.setStart(nodes[k], i);
-        r.setEnd(nodes[k], i + q.length);
+        r.setStart(nodes[k], origStart);
+        r.setEnd(nodes[k], origEnd);
         ranges.push(r);
-        i = data.indexOf(q, i + q.length);
       }
     }
     findQuery = q;
@@ -321,9 +344,21 @@ export function hostUpdate(markdown: string, opts?: HostOptions): void {
   }
 }
 
-// Bridge registration (Kotlin calls these via evaluateJavascript).
+// Bridge registration (Kotlin calls these via evaluateJavascript). The
+// fold functions are exposed read-only so the node harness tests the
+// production implementation, not a parallel test-only copy (M3);
+// foldOperationCount is the cache-reuse probe.
 const bridge = globalThis as unknown as Record<string, unknown>;
-bridge.MathMD = { ...(bridge.MathMD as object | undefined ?? {}), hostUpdate, find };
+bridge.MathMD = {
+  ...(bridge.MathMD as object | undefined ?? {}),
+  hostUpdate,
+  find,
+  foldCaseWithMap,
+  foldedMatchRanges,
+  matchRangesInFolded,
+  alignOwnerMap,
+  foldOperationCount,
+};
 
 // Initial state so the pane is never a mystery: show an explicit empty note
 // until the first document arrives.

@@ -1,7 +1,6 @@
 package io.github.lckhot.mathmd
 
 import android.content.ContentResolver
-import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import java.io.IOException
@@ -21,27 +20,56 @@ internal class DocumentIo(
 ) {
     private val io: ExecutorService = Executors.newSingleThreadExecutor()
 
+    // M4: both load and create go through the same best-effort grant policy.
+    private val grants = DocumentGrants(
+        take = { uri, flags ->
+            resolver.takePersistableUriPermission(Uri.parse(uri), flags)
+        },
+        onFail = { uri, e ->
+            android.util.Log.w("MathMD", "persistable grant failed for $uri", e)
+        },
+    )
+
     fun shutdown() = io.shutdown()
 
-    fun displayName(uri: Uri): String =
-        resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-            val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-            if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
-        } ?: "untitled.md"
+    /**
+     * Best-effort display name. NEVER throws: a provider that returns a
+     * null cursor, hides the column, or fails the query outright
+     * (SecurityException, dead provider, ...) all degrade to the same
+     * fallback — a URI often stays usable even when its metadata query
+     * does not, and a fallback name beats aborting the operation.
+     * Totality is load-bearing: callers run on the IO executor, where an
+     * uncaught exception kills the whole process.
+     */
+    fun displayName(uri: Uri): String {
+        val name = try {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c ->
+                    val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+                }
+        } catch (e: Exception) {
+            // Same degradation as a null cursor: a usable name beats a crash.
+            android.util.Log.w("MathMD", "display-name query failed for $uri", e)
+            null
+        }
+        return name ?: "untitled.md"
+    }
 
     /** Async display-name lookup (provider query must not run on main). */
     fun resolveName(uri: Uri, onDone: (String) -> Unit) {
         io.execute {
-            // A provider can grant a writable URI while rejecting its metadata
-            // query. That must not silently abort Save As or strand a guarded
-            // follow-up; the URI is still usable with a fallback display name.
-            val name = try {
-                displayName(uri)
-            } catch (_: Exception) {
-                "untitled.md"
-            }
+            val name = displayName(uri)
             onUi { onDone(name) }
         }
+    }
+
+    /**
+     * Queue a best-effort persistable grant for [uri] (M4). Call this the
+     * moment a CreateDocument picker returns — do NOT wait for resolveName.
+     */
+    fun persistGrant(uri: Uri) {
+        io.execute { grants.takeNow(uri.toString()) }
     }
 
     /** Async load; [onLoaded] runs on the UI thread with (name, content). */
@@ -49,17 +77,12 @@ internal class DocumentIo(
         io.execute {
             try {
                 val content = resolver.openInputStream(uri)?.use {
-                    it.readBytes().toString(Charsets.UTF_8)
+                    DocumentDecoder.decode(it.readBytes())
                 } ?: throw IOException("no data")
                 val name = displayName(uri)
-                try {
-                    resolver.takePersistableUriPermission(
-                        uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION,
-                    )
-                } catch (_: SecurityException) {
-                    // ACTION_VIEW grants are often session-scoped; save falls back to Save As.
-                }
+                // Already inside the executor: take the grant directly, no
+                // re-queue. Same READ|WRITE policy as the create path.
+                grants.takeNow(uri.toString())
                 onUi { onLoaded(name, content) }
             } catch (e: Exception) {
                 onUi { toast("Open failed: ${e.message}") }
@@ -85,6 +108,31 @@ internal class DocumentIo(
             } catch (e: Exception) {
                 onUi { toast("Save failed: ${e.message}") }
             }
+        }
+    }
+
+    /**
+     * CreateDocument write, LIFECYCLE-DECOUPLED (Lead round 6, issue 9):
+     * name resolution AND the write run as ONE executor task, so the
+     * confirmed snapshot reaches the confirmed URI even when the Activity
+     * is destroyed mid-flight (rotation used to kill the UI callback that
+     * was the only place queueing the write — leaving a 0-byte orphan and
+     * dropping the follow-up). [onDone] runs on the UI thread once, with
+     * the resolved display name and whether the write succeeded; if the UI
+     * is gone the post simply lands in a dead closure, which must no-op.
+     */
+    fun createAndWrite(uri: Uri, content: String, onDone: (name: String, saved: Boolean) -> Unit) {
+        io.execute {
+            val name = displayName(uri)
+            val saved = try {
+                resolver.openOutputStream(uri, "wt")?.use {
+                    it.write(content.toByteArray(Charsets.UTF_8))
+                } != null
+            } catch (e: Exception) {
+                onUi { toast("Save failed: ${e.message}") }
+                false
+            }
+            onUi { onDone(name, saved) }
         }
     }
 }

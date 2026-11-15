@@ -27,7 +27,9 @@
  * and the first row becomes the GFM header — matching how the ChatGPT
  * client renders these tables. Blank lines are inserted around the
  * converted table so it forms its own block even when the source glued it
- * to prose. Runs below the thresholds are left as prose.
+ * to prose. Runs below the thresholds are left as prose, and runs whose
+ * lines carry blockquote/list markers or leading whitespace (container
+ * content) are left entirely unchanged (L2).
  */
 
 export interface TsvOptions {
@@ -38,6 +40,19 @@ export interface TsvOptions {
 }
 
 const DEFAULTS: TsvOptions = { minRows: 3, minCols: 2 };
+
+/**
+ * L2: a line that plausibly lives inside a container (blockquote marker,
+ * list marker, or any leading whitespace — indented content of a list,
+ * quote or lazy continuation). TSV runs containing such lines are left
+ * entirely unchanged: converting them would either hoist container content
+ * into a top-level table or wedge table markup inside a quote/list.
+ * Leading whitespace is treated as container-ish even though 1-3 spaces
+ * can also be plain top-level indent — without a container model the
+ * safe direction is to skip.
+ */
+const looksContainerLine = (line: string): boolean =>
+  /^[\t >]/.test(line) || /^(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/.test(line);
 
 /** Defensive clamp: the Settings dialog clamps, but the values also arrive
  *  as JSON over the bridge — never trust them below the meaningful floor
@@ -76,9 +91,11 @@ export function convertTsvTables(text: string, opts?: Partial<TsvOptions>): stri
     const paras: TsvParagraph[] = [];
     let cols = minCols;
     let end = i;
+    let containsContainerLine = looksContainerLine(lines[i]);
     for (;;) {
       const rows: string[][] = [];
       while (end < lines.length && isTsvLine(lines[end])) {
+        if (looksContainerLine(lines[end])) containsContainerLine = true;
         const cells = lines[end].split('\t');
         if (cells.length > cols) cols = cells.length;
         rows.push(cells);
@@ -101,6 +118,12 @@ export function convertTsvTables(text: string, opts?: Partial<TsvOptions>): stri
     const totalRows = paras.reduce((s, p) => s + p.rows.length, 0);
     if (totalRows < minRows) {
       // Below the trigger threshold: prose, not a table.
+      for (let k = i; k < end; k++) out.push(lines[k]);
+      i = end;
+      continue;
+    }
+    if (containsContainerLine) {
+      // L2: blockquote/list/indented content — leave the whole run alone.
       for (let k = i; k < end; k++) out.push(lines[k]);
       i = end;
       continue;

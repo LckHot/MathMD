@@ -145,8 +145,22 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     // New handle an unsaved document identically (owner spec); only the
     // "continue" action differs.
     var guardAction by rememberSaveable { mutableStateOf<GuardAction?>(null) }
-    var openInNewWindow by remember { mutableStateOf(false) }
-    var pendingActionAfterSave by remember { mutableStateOf<GuardAction?>(null) }
+    // H1: both picker-flow flags must survive configuration changes and
+    // process restoration — DocumentsUI is a separate activity, and this
+    // process can be recycled (or recreated by a dark-mode/font/density
+    // change) while the picker is up. A lost flag used to turn the
+    // ActivityResult callback into an unconditional loadFromUri that
+    // clobbered the restored dirty buffer.
+    // (restoredViewHandled below deliberately stays a PLAIN remember: it
+    // must be false again after every restoration to intercept the stale
+    // launch-intent redelivery.)
+    var openInNewWindow by rememberSaveable { mutableStateOf(false) }
+    var pendingActionAfterSave by rememberSaveable { mutableStateOf<GuardAction?>(null) }
+    // Durable record of an in-flight Create flow: set at accept (naming
+    // the gate ticket's generation), cleared by its OWN live callback, a
+    // document switch (New/Load), or a newer Create. A recreated
+    // composition only surfaces the UNKNOWN outcome once — never rebinds.
+    var pendingCreate by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Search: cursor lives HERE, shared by both panes (owner spec: search
     // works in Edit and Preview; flipping modes re-runs the same query).
@@ -167,18 +181,54 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     val documentIo = remember {
         DocumentIo(resolver, { block -> mainHandler.post(block) }, { msg -> toast(msg) })
     }
-    DisposableEffect(documentIo) { onDispose { documentIo.shutdown() } }
+    // H2: request gate for every async document callback. Plain remember on
+    // purpose — it manages only requests of THIS live instance; after
+    // process death there is nothing to resurrect, and the restored buffer
+    // must not be clobbered by a resurrected "ticket".
+    val gate = remember { DocumentRequestGate() }
+    DisposableEffect(documentIo) {
+        onDispose {
+            // Fixed order (H2): invalidate every in-flight callback first,
+            // THEN shut the executor down — a resolveName callback landing
+            // in between must not submit new work to a dead executor.
+            gate.invalidateAll()
+            documentIo.shutdown()
+        }
+    }
 
-    fun loadFromUri(uri: Uri) = documentIo.loadFromUri(uri) { name, content ->
-        doc.uri = uri
-        doc.name = name
-        doc.savedText = content
-        text = content
-        // A document replacement invalidates the previous pane's matches.
-        if (searchOpen) requestSearch()
-        // NOTE: mode is NOT touched here — it is governed solely by the
-        // startup-mode preference (set at composition and for external
-        // opens). Forcing Edit here overrides the pref.
+    // H1: picker flag plumbing goes through the pure PickerFlow reducer so
+    // the terminal-state contract is the unit-tested one.
+    fun pickerFlags() = PickerFlags(openInNewWindow, pendingActionAfterSave)
+    fun applyPickerFlags(f: PickerFlags) {
+        openInNewWindow = f.openInNewWindow
+        pendingActionAfterSave = f.pendingAfterSave
+    }
+
+    fun loadFromUri(uri: Uri) {
+        // Single load entry point (H2): in-app Open and external ACTION_VIEW
+        // share it, so both are generation-tracked. A document switch ends
+        // any in-flight Create's ownership of this window.
+        pendingCreate = null
+        val ticket = gate.beginLoad(uri.toString(), text)
+        documentIo.loadFromUri(uri) { name, content ->
+            when (gate.classifyLoad(ticket, uri.toString(), text)) {
+                DocumentRequestGate.LoadDecision.Apply -> {
+                    doc.uri = uri
+                    doc.name = name
+                    doc.savedText = content
+                    text = content
+                    // A document replacement invalidates the previous pane's matches.
+                    if (searchOpen) requestSearch()
+                    // NOTE: mode is NOT touched here — it is governed solely by the
+                    // startup-mode preference (set at composition and for external
+                    // opens). Forcing Edit here overrides the pref.
+                }
+                DocumentRequestGate.LoadDecision.KeepEdits ->
+                    // Typed during the read: the edits win, the load is dropped.
+                    toast("Document changed while loading; kept your edits")
+                DocumentRequestGate.LoadDecision.Discard -> Unit
+            }
+        }
     }
 
     val openLauncher = rememberLauncherForActivityResult(
@@ -188,14 +238,17 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         // terminal path of that launcher — cancel included — or it fires on
         // a later, unrelated action (review R1).
         if (uri == null) {
-            openInNewWindow = false
+            applyPickerFlags(PickerFlow.openCancelled(pickerFlags()))
             return@rememberLauncherForActivityResult
         }
-        if (openInNewWindow) {
+        // H1: capture the dispatch decision into a local BEFORE consuming
+        // the flag, then apply the terminal transition.
+        val inNewWindow = openInNewWindow
+        applyPickerFlags(PickerFlow.openConsumed(pickerFlags()))
+        if (inNewWindow) {
             // "Keep this instance, open in a new window": re-enter the app
             // via ACTION_VIEW — documentLaunchMode gives the file its own
             // instance (or focuses the one already showing it).
-            openInNewWindow = false
             val view = Intent(Intent.ACTION_VIEW, uri).apply {
                 setPackage(context.packageName)
                 addFlags(
@@ -217,6 +270,11 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
 
     /** Reset this window to a fresh blank document (New). */
     fun newDocument() {
+        // H2: bump BEFORE clearing, so in-flight callbacks for the previous
+        // document cannot write into the fresh one. New also ends any
+        // in-flight Create's ownership of this window.
+        gate.beginNewDocument()
+        pendingCreate = null
         doc.uri = null
         doc.name = "untitled.md"
         doc.savedText = ""
@@ -225,10 +283,23 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         // mode is NOT touched here either — same rule as loadFromUri.
     }
 
+    /**
+     * Launch helpers (H1): a launcher that fails to START must consume its
+     * flag too, or the next unrelated picker action inherits a stale one.
+     */
+    fun launchOpenPicker() {
+        try {
+            openLauncher.launch(OPEN_MIMES)
+        } catch (e: Exception) {
+            applyPickerFlags(PickerFlow.openLaunchFailed(pickerFlags()))
+            toast("Could not open the file picker: ${e.message}")
+        }
+    }
+
     /** The follow-up a guard decision unlocks for action [action]. */
     fun afterGuardAction(action: GuardAction) {
         when (action) {
-            GuardAction.Open -> openLauncher.launch(OPEN_MIMES)
+            GuardAction.Open -> launchOpenPicker()
             GuardAction.New -> newDocument()
         }
     }
@@ -239,23 +310,63 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     val createLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("text/markdown"),
     ) { uri ->
-        // Same cancel-path invariant as openLauncher (review R1): a stale
-        // pendingActionAfterSave would fire the guard's follow-up (e.g. the
-        // Open picker) after an ordinary save.
+        // Cancel consumes ONLY this picker's pending flag; a durable record
+        // of an earlier still-in-flight create stays untouched (it may
+        // still be cleared by its own callback or a document switch).
         if (uri == null) {
-            pendingActionAfterSave = null
+            applyPickerFlags(PickerFlow.createCancelled(pickerFlags()))
             return@rememberLauncherForActivityResult
         }
+        // M4: request the persistable grant IMMEDIATELY. The WRITE is one
+        // lifecycle-decoupled executor task (name resolution + write
+        // together) — the confirmed snapshot must reach the confirmed URI
+        // even if this Activity is destroyed mid-flight.
+        documentIo.persistGrant(uri)
         val snapshot = text
-        documentIo.resolveName(uri) { name ->
-            doc.uri = uri
-            doc.name = name
-            val followUp = pendingActionAfterSave
-            pendingActionAfterSave = null
-            documentIo.writeTo(uri, snapshot) {
-                doc.savedText = snapshot
-                if (followUp != null) afterGuardAction(followUp)
+        val followUp = pendingActionAfterSave
+        applyPickerFlags(PickerFlow.createAccepted(pickerFlags()))
+        val ticket = gate.beginCreate(uri.toString(), snapshot)
+        // Durable record (v2, names THIS operation): a recreated
+        // composition learns "a create was in flight, outcome unknown";
+        // it replaces any record of an older unfinished create.
+        pendingCreate = CreateFlow.encode(ticket.generation, uri.toString(), followUp)
+        documentIo.createAndWrite(uri, snapshot) { name, saved ->
+            // Dead closures (recreated Activity) no-op: gate.disposed.
+            if (gate.disposed) return@createAndWrite
+            // Only this operation's own record may be cleared — a late
+            // callback for create A must never clear create B's record.
+            if (CreateFlow.owns(pendingCreate, ticket.generation)) {
+                pendingCreate = null
             }
+            if (!saved) return@createAndWrite // failure toast already shown; no rebind
+            if (gate.isCurrent(ticket)) {
+                doc.uri = uri
+                doc.name = name
+                doc.savedText = snapshot
+                if (followUp != null) {
+                    // A2: only an unedited buffer lets the original action
+                    // run; otherwise re-open the dirty guard for it.
+                    when (gate.classifyFollowUp(ticket, text)) {
+                        DocumentRequestGate.FollowUpDecision.Execute ->
+                            afterGuardAction(followUp)
+                        DocumentRequestGate.FollowUpDecision.ReGuard ->
+                            guardAction = followUp
+                    }
+                }
+            } else {
+                // A1 (late create = background copy): the confirmed URI got
+                // the confirmed snapshot; this document stays as it is.
+                toast("Saved a copy to the chosen file; this document stayed open")
+            }
+        }
+    }
+
+    fun launchCreatePicker(name: String) {
+        try {
+            createLauncher.launch(name)
+        } catch (e: Exception) {
+            applyPickerFlags(PickerFlow.createLaunchFailed(pickerFlags()))
+            toast("Could not open the save-as picker: ${e.message}")
         }
     }
 
@@ -263,11 +374,17 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         val uri = doc.uri
         val snapshot = text // pin NOW: keystrokes during the async write stay dirty
         if (uri == null) {
-            createLauncher.launch(doc.name)
+            launchCreatePicker(doc.name)
         } else {
+            // H2: plain saves do not bump the generation — editing during
+            // the write is legal. The ticket binds the callback to THIS
+            // document; the write itself always targets the captured URI.
+            val ticket = gate.saveTicket(uri.toString(), snapshot)
             documentIo.writeTo(uri, snapshot) {
-                doc.savedText = snapshot
-                toast("Saved")
+                if (gate.shouldApplySaveOnOk(ticket, doc.uri?.toString())) {
+                    doc.savedText = snapshot
+                    toast("Saved")
+                }
             }
         }
     }
@@ -278,13 +395,32 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
         val snapshot = text
         if (uri == null) {
             // Untitled + dirty: Save As first; the action follows once it lands.
-            pendingActionAfterSave = action
-            createLauncher.launch(doc.name)
+            applyPickerFlags(PickerFlow.saveThenUntitled(pickerFlags(), action))
+            launchCreatePicker(doc.name)
         } else {
+            // Issue 10: saveThen carries an operation identity — when two
+            // Save-and-continue flows overlap, only the LATEST may run its
+            // follow-up, so the two converge to ONE end state instead of
+            // firing both actions in completion order. Older operations
+            // still apply their savedText above (their write targeted the
+            // captured URI and is already on disk).
+            val op = gate.beginSaveThen(uri.toString(), snapshot)
             documentIo.writeTo(uri, snapshot) {
-                doc.savedText = snapshot
-                toast("Saved")
-                afterGuardAction(action)
+                if (gate.shouldApplySaveOnOk(op.ticket, doc.uri?.toString())) {
+                    doc.savedText = snapshot
+                    toast("Saved")
+                    if (gate.isLatestSaveThen(op)) {
+                        when (gate.classifyFollowUp(op.ticket, text)) {
+                            // A2: only an unedited buffer lets the original
+                            // Open/New action run; otherwise re-open the
+                            // dirty guard for it (latest guard wins).
+                            DocumentRequestGate.FollowUpDecision.Execute -> afterGuardAction(action)
+                            DocumentRequestGate.FollowUpDecision.ReGuard -> guardAction = action
+                        }
+                    }
+                }
+                // Stale (New/another open won): write went to the captured
+                // URI; the new document's state stays untouched.
             }
         }
     }
@@ -316,18 +452,45 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
     // with a bumped viewRequest. A clean buffer reloads (picking up external
     // edits), but a dirty one is kept rather than silently overwritten.
     //
-    // PROCESS RESTORE (blind-audit CRITICAL): after the process is killed
-    // and recreated, the original ACTION_VIEW intent is redelivered — but
-    // rememberSaveable has already restored the buffer AND the DocumentState
-    // (with unsaved edits). Re-loading the SAME uri from disk here would
-    // silently clobber those edits, so skip it; a DIFFERENT uri is a
-    // genuine new open and always loads.
+    // PROCESS RESTORE (blind-audit CRITICAL; widened after review found the
+    // different-Uri case): after the process is killed and recreated — or
+    // any recreation with saved state — the system redelivers the ORIGINAL
+    // launch intent, which is stale once the user switched documents in
+    // this instance (Open to another file, or New): rememberSaveable has
+    // already restored the buffer AND DocumentState, edits included, and
+    // the redelivered Uri may belong to a document this window is no longer
+    // showing. So the FIRST run after a restore never loads when any
+    // session was restored; loading would silently clobber it. A genuinely
+    // new ACTION_VIEW arrives later via onNewIntent (bumped viewRequest),
+    // by which time restoredViewHandled is true — only a restore-time run
+    // can be the stale launch intent.
     var restoredViewHandled by remember { mutableStateOf(false) }
-    LaunchedEffect(externalUri, viewRequest) {
-        if (externalUri != null) {
+
+    // ONE-TIME notice for an in-flight Create flow destroyed by a
+    // configuration change or process death. The new composition has NO
+    // operation owner: the executor write may or may not have run, and the
+    // outcome cannot be observed from here — the result is UNKNOWN, and we
+    // do not claim exactly-once anything. Recovery therefore only clears
+    // the record and tells the user ONCE. The buffer text is kept as
+    // restored (no rebind, no savedText change, no duplicate write, no
+    // automatic Open/New, and no re-armed old dirty guard); the live
+    // follow-up flow keeps working in the composition that owns it.
+    LaunchedEffect(Unit) {
+        val record = pendingCreate ?: return@LaunchedEffect
+        pendingCreate = null
+        // Malformed (or foreign-version) records carry no actionable
+        // information beyond their own removal.
+        if (CreateFlow.decode(record) == null) return@LaunchedEffect
+        toast("A save to the chosen file may or may not have completed; check it before saving again")
+    }
+    LaunchedEffect(externalUri, viewRequest) {        if (externalUri != null) {
             val sameDocument = externalUri == doc.uri
+            // Anything restored worth keeping? An empty untitled buffer has
+            // nothing to lose — loading the redelivered Uri then simply
+            // recreates the original open.
+            val restoredSession = doc.uri != null || text.isNotEmpty()
             val wouldClobberRestore =
-                processRestored && !restoredViewHandled && sameDocument
+                processRestored && !restoredViewHandled && restoredSession
             val wouldClobberDirty = sameDocument && dirty
             if (!wouldClobberRestore && !wouldClobberDirty) {
                 mode = if (settings.startupMode == "preview") Mode.Preview else Mode.Edit
@@ -402,7 +565,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                                     // Dirty buffer: ask FIRST (save / discard /
                                     // new window), then show the picker.
                                     if (dirty) guardAction = GuardAction.Open
-                                    else openLauncher.launch(OPEN_MIMES)
+                                    else launchOpenPicker()
                                 },
                             )
                             DropdownMenuItem(
@@ -416,7 +579,7 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                                 text = { Text("Save as…") },
                                 onClick = {
                                     menuOpen = false
-                                    createLauncher.launch(doc.name)
+                                    launchCreatePicker(doc.name)
                                 },
                             )
                             DropdownMenuItem(
@@ -511,8 +674,8 @@ private fun MathMdApp(externalUri: Uri?, viewRequest: Int, processRestored: Bool
                 onKeepAndNewWindow = {
                     guardAction = null
                     if (action == GuardAction.Open) {
-                        openInNewWindow = true
-                        openLauncher.launch(OPEN_MIMES)
+                        applyPickerFlags(PickerFlow.keepAndNewWindowChosen(pickerFlags()))
+                        launchOpenPicker()
                     } else {
                         openBlankInNewWindow()
                     }

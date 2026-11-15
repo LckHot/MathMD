@@ -1,17 +1,831 @@
 "use strict";
 (() => {
+  // tools/preview-src/src/linkrefs.ts
+  function normalizeReference(label) {
+    return label.trim().replace(/\s+/g, " ").toLowerCase().toUpperCase();
+  }
+  var MAX_LABEL = 1e3;
+  var isBlankLine = (line) => line.trim() === "";
+  function listFamilyOf(line) {
+    const m = /^ {0,3}([-+*]|(\d{1,9})([.)]))(?:[ \t]+|$)/.exec(line);
+    if (!m) return null;
+    if (m[2] !== void 0) return m[3];
+    return m[1];
+  }
+  function isPureListMarker(line) {
+    const m = /^ {0,3}([-+*]|\d{1,9}[.)])[ \t]*$/.exec(line);
+    return m !== null;
+  }
+  function isSetextShaped(line) {
+    return /^ {0,3}(=+|-+)[ \t]*$/.test(line);
+  }
+  function parseDestination(src, pos, eol) {
+    if (pos >= eol) return null;
+    if (src[pos] === "<") {
+      let j2 = pos + 1;
+      let destRaw2 = "";
+      while (j2 < eol) {
+        const c = src[j2];
+        if (c === "\\" && j2 + 1 < eol) {
+          destRaw2 += src.slice(j2, j2 + 2);
+          j2 += 2;
+          continue;
+        }
+        if (c === "<") return null;
+        if (c === ">") {
+          const raw = src.slice(pos, j2 + 1);
+          return { destRaw: raw, content: raw.slice(1, -1), after: j2 + 1 };
+        }
+        destRaw2 += c;
+        j2++;
+      }
+      return null;
+    }
+    let depth = 0;
+    let j = pos;
+    let destRaw = "";
+    while (j < eol) {
+      const c = src[j];
+      if (c === "\\" && j + 1 < eol) {
+        destRaw += src.slice(j, j + 2);
+        j += 2;
+        continue;
+      }
+      if (c === " " || c === "	") break;
+      if (c === "(") {
+        depth++;
+      } else if (c === ")") {
+        if (depth === 0) break;
+        depth--;
+      }
+      destRaw += c;
+      j++;
+    }
+    if (destRaw.length === 0 || depth !== 0) return null;
+    return { destRaw, content: destRaw, after: j };
+  }
+  function parseTitleStart(src, pos, eol) {
+    if (pos >= eol) return { kind: "none" };
+    const q = src[pos];
+    if (q !== '"' && q !== "'" && q !== "(") return { kind: "none" };
+    const close = q === "(" ? ")" : q;
+    let j = pos + 1;
+    while (j < eol) {
+      const c = src[j];
+      if (c === "\\" && j + 1 < eol) {
+        j += 2;
+        continue;
+      }
+      if (c === close) {
+        if (src.slice(j + 1, eol).trim() !== "") return { kind: "none" };
+        return {
+          kind: "complete",
+          titleRaw: src.slice(pos, j + 1),
+          content: src.slice(pos + 1, j),
+          after: j + 1
+        };
+      }
+      j++;
+    }
+    return { kind: "open", quote: close };
+  }
+  function collectLinkDefs(source) {
+    const candidates = [];
+    const byStart = /* @__PURE__ */ new Map();
+    const byLabel = /* @__PURE__ */ new Map();
+    const n = source.length;
+    const endOfLine = (p) => {
+      const idx = source.indexOf("\n", p);
+      return idx === -1 ? n : idx;
+    };
+    const lineEnd = (p) => {
+      const e = endOfLine(p);
+      if (e > p && source[e - 1] === "\r") return e - 1;
+      return e;
+    };
+    const nextLineStart = (p) => {
+      const eol = endOfLine(p);
+      return eol >= n ? n : eol + 1;
+    };
+    const lineText = (p, eol) => {
+      const s = source.slice(p, eol);
+      return s.endsWith("\r") ? s.slice(0, -1) : s;
+    };
+    const isBlankAt = (p) => {
+      if (p >= n) return false;
+      return isBlankLine(lineText(p, endOfLine(p)));
+    };
+    let state = "none";
+    let pending = null;
+    let mlTitle = null;
+    const finalize = (start, labelRaw, destRaw, destContent, titleRaw, titleContent, extentEnd) => {
+      const normalized = normalizeReference(labelRaw);
+      const idx = candidates.length;
+      candidates.push({ start, labelRaw, destRaw, destContent, titleRaw, titleContent, extentEnd });
+      byStart.set(start, idx);
+      if (!byLabel.has(normalized)) byLabel.set(normalized, idx);
+    };
+    const tryStart = (bracket, lineStart) => {
+      const p = bracket;
+      if (source[p] !== "[") return "no";
+      let j = p + 1;
+      let labelRaw = "";
+      while (j < n) {
+        const c = source[j];
+        if (c === "\\" && j + 1 < n) {
+          labelRaw += source.slice(j, j + 2);
+          j += 2;
+          continue;
+        }
+        if (c === "[") return "no";
+        if (c === "]") break;
+        if (c === "\n") {
+          if (isBlankAt(j + 1)) return "no";
+          labelRaw += "\n";
+          j++;
+          continue;
+        }
+        labelRaw += c;
+        j++;
+      }
+      if (j >= n) return "no";
+      if (labelRaw.length < 1 || labelRaw.length > MAX_LABEL) return "no";
+      if (labelRaw.trim() === "") return "no";
+      const afterLabel = j + 1;
+      if (source[afterLabel] !== ":") return "no";
+      const eol = lineEnd(afterLabel);
+      let q = afterLabel + 1;
+      while (q < eol && (source[q] === " " || source[q] === "	")) q++;
+      if (q >= eol) {
+        pending = { start: lineStart, labelRaw };
+        return "started-pending";
+      }
+      const dest = parseDestination(source, q, eol);
+      if (!dest) return "no";
+      let r = dest.after;
+      while (r < eol && (source[r] === " " || source[r] === "	")) r++;
+      const title = parseTitleStart(source, r, eol);
+      if (title.kind === "none") {
+        if (source.slice(r, eol).trim() !== "") return "no";
+        finalize(lineStart, labelRaw, dest.destRaw, dest.content, null, null, eol);
+        return "started-complete";
+      }
+      if (title.kind === "complete") {
+        finalize(lineStart, labelRaw, dest.destRaw, dest.content, title.titleRaw, title.content, eol);
+        return "started-titled";
+      }
+      mlTitle = {
+        start: lineStart,
+        labelRaw,
+        destRaw: dest.destRaw,
+        destContent: dest.content,
+        titleStart: r,
+        quote: title.quote,
+        sameLineOpen: true
+      };
+      return "started-complete";
+    };
+    let i = 0;
+    while (i < n) {
+      const rawEol = endOfLine(i);
+      const eol = lineEnd(i);
+      const line = lineText(i, eol);
+      if (state === "none") {
+        if (isBlankLine(line)) {
+          i = nextLineStart(i);
+          continue;
+        }
+        const m = /^ {0,3}\[/.exec(line);
+        let started = false;
+        if (m) {
+          const res = tryStart(i + m[0].length - 1, i);
+          if (res === "started-pending") {
+            state = "await-dest";
+            started = true;
+          } else if (res === "started-complete") {
+            started = true;
+            state = mlTitle ? "multiline-title" : "title-allowed";
+          }
+        }
+        i = nextLineStart(i);
+        if (started) continue;
+        continue;
+      }
+      if (state === "await-dest") {
+        const pend = pending;
+        if (isBlankLine(line)) {
+          state = "none";
+          pending = null;
+          i = nextLineStart(i);
+          continue;
+        }
+        if (isSetextShaped(line) || isPureListMarker(line)) {
+          state = "none";
+          pending = null;
+          i = nextLineStart(i);
+          continue;
+        }
+        let q = i;
+        while (q < eol && (source[q] === " " || source[q] === "	")) q++;
+        const dest = parseDestination(source, q, eol);
+        if (!dest) {
+          state = "none";
+          pending = null;
+          continue;
+        }
+        let r = dest.after;
+        while (r < eol && (source[r] === " " || source[r] === "	")) r++;
+        const title = parseTitleStart(source, r, eol);
+        if (title.kind === "complete") {
+          finalize(pend.start, pend.labelRaw, dest.destRaw, dest.content, title.titleRaw, title.content, eol);
+          state = "none";
+          pending = null;
+          i = nextLineStart(i);
+          continue;
+        }
+        if (title.kind === "open") {
+          mlTitle = {
+            start: pend.start,
+            labelRaw: pend.labelRaw,
+            destRaw: dest.destRaw,
+            destContent: dest.content,
+            titleStart: r,
+            quote: title.quote,
+            sameLineOpen: false
+          };
+          state = "multiline-title";
+          pending = null;
+          i = nextLineStart(i);
+          continue;
+        }
+        if (source.slice(r, eol).trim() !== "") {
+          state = "none";
+          pending = null;
+          continue;
+        }
+        finalize(pend.start, pend.labelRaw, dest.destRaw, dest.content, null, null, eol);
+        state = "title-allowed";
+        pending = null;
+        i = nextLineStart(i);
+        continue;
+      }
+      if (state === "title-allowed") {
+        if (isBlankLine(line)) {
+          state = "none";
+          i = nextLineStart(i);
+          continue;
+        }
+        let q = i;
+        while (q < eol && (source[q] === " " || source[q] === "	")) q++;
+        const title = parseTitleStart(source, q, eol);
+        if (title.kind === "complete") {
+          const cand = candidates[candidates.length - 1];
+          candidates[candidates.length - 1] = {
+            ...cand,
+            titleRaw: title.titleRaw,
+            titleContent: title.content,
+            extentEnd: eol
+          };
+          state = "none";
+          i = nextLineStart(i);
+          continue;
+        }
+        if (title.kind === "open") {
+          const cand = candidates[candidates.length - 1];
+          mlTitle = {
+            start: cand.start,
+            labelRaw: cand.labelRaw,
+            destRaw: cand.destRaw,
+            destContent: cand.destContent,
+            titleStart: q,
+            quote: title.quote,
+            sameLineOpen: false
+          };
+          state = "multiline-title";
+          i = nextLineStart(i);
+          continue;
+        }
+        state = "none";
+        continue;
+      }
+      {
+        const mt = mlTitle;
+        const failCandidate = () => {
+          const last = candidates[candidates.length - 1];
+          if (last && last.start === mt.start) {
+            candidates.pop();
+            byStart.delete(mt.start);
+            const normalized = normalizeReference(mt.labelRaw);
+            if (byLabel.get(normalized) === candidates.length) byLabel.delete(normalized);
+          }
+        };
+        if (isBlankLine(line)) {
+          if (mt.sameLineOpen) failCandidate();
+          state = "none";
+          mlTitle = null;
+          i = nextLineStart(i);
+          continue;
+        }
+        let j = i;
+        let closed = -1;
+        while (j < eol) {
+          const c = source[j];
+          if (c === "\\" && j + 1 < eol) {
+            j += 2;
+            continue;
+          }
+          if (c === mt.quote) {
+            closed = j;
+            break;
+          }
+          j++;
+        }
+        if (closed >= 0) {
+          if (source.slice(closed + 1, eol).trim() !== "") {
+            if (mt.sameLineOpen) failCandidate();
+            state = "none";
+            mlTitle = null;
+            i = nextLineStart(i);
+            continue;
+          }
+          const titleRaw = source.slice(mt.titleStart, closed + 1);
+          const titleContent = source.slice(mt.titleStart + 1, closed);
+          finalize(mt.start, mt.labelRaw, mt.destRaw, mt.destContent, titleRaw, titleContent, eol);
+          state = "none";
+          mlTitle = null;
+        }
+        i = nextLineStart(i);
+        continue;
+      }
+    }
+    return { candidates, byStart, byLabel };
+  }
+  var LABEL_TOKEN_SOURCE = "MLABELPH[A-Z0-9]{1,8}[0-9]+[aA]{32}MMM";
+  var LIT_TOKEN_SOURCE = "MLITPH[A-Z0-9]{1,8}[0-9]+MLM";
+  function variantSuffix(occurrenceId) {
+    const bits = new Array(32);
+    for (let b = 0; b < 32; b++) {
+      bits[b] = (occurrenceId & 1 << b) !== 0 ? "A" : "a";
+    }
+    return bits.join("");
+  }
+  function labelToken(salt, baseId, occurrenceId) {
+    return `MLABELPH${salt}${baseId}${variantSuffix(occurrenceId)}MMM`;
+  }
+  function litToken(salt, index) {
+    return `MLITPH${salt}${index}MLM`;
+  }
+  function unescapeContent(s) {
+    let out = "";
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] === "\\" && i + 1 < s.length && isAsciiPunctuation(s[i + 1])) {
+        out += s[i + 1];
+        i++;
+        continue;
+      }
+      out += s[i];
+    }
+    return out;
+  }
+  function isAsciiPunctuation(c) {
+    return /[!-/:-@\[-`{-~]/.test(c);
+  }
+
+  // tools/preview-src/src/blockcontext.ts
+  var ATX_RE = /^#{1,6}(?:[ \t]+|$)/;
+  var SETEXT_EQ_RE = /^=+[ \t]*$/;
+  var SETEXT_DASH_RE = /^-+[ \t]*$/;
+  var HR_RE = /^([-*_])([ \t]*\1){2,}[ \t]*$/;
+  var LIST_RE = /^([-+*]|\d{1,9}[.)])(?:[ \t]+|$)/;
+  var FENCE_RE = /^(`{3,}|~{3,})/;
+  var HR_DASH_RE = /^-{3,}[ \t]*$/;
+  function countTrailingBackslashes(s) {
+    let k = 0;
+    while (k < s.length && s[s.length - 1 - k] === "\\") k++;
+    return k;
+  }
+  function splitUnescapedPipes(s) {
+    const parts = [];
+    let cur = "";
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === "|" && countTrailingBackslashes(cur) % 2 === 0) {
+        parts.push(cur);
+        cur = "";
+        continue;
+      }
+      cur += c;
+    }
+    parts.push(cur);
+    return parts;
+  }
+  function tableCells(line) {
+    if (!line.includes("|")) return null;
+    let cells = splitUnescapedPipes(line);
+    if (cells.length > 1 && cells[0].trim() === "") cells = cells.slice(1);
+    if (cells.length > 1 && cells[cells.length - 1].trim() === "") cells = cells.slice(0, -1);
+    return cells;
+  }
+  function isTableDelimiter(t) {
+    const cells = tableCells(t);
+    if (!cells) return false;
+    return cells.every((c) => /^:?-+:?$/.test(c.trim()));
+  }
+  function headerMatchesDelimiter(header, delim) {
+    const h = tableCells(header);
+    const d = tableCells(delim);
+    if (!h || !d) return false;
+    return h.length === d.length;
+  }
+  function delimiterRowShape(delimiter) {
+    const dsp = /^ */.exec(delimiter)[0].length;
+    if (dsp > 3) return false;
+    const dt = delimiter.slice(dsp);
+    if (LIST_RE.test(dt)) return false;
+    return isTableDelimiter(dt);
+  }
+  function isValidRawTable(header, delimiter) {
+    const hsp = /^ */.exec(header)[0].length;
+    if (hsp > 3) return false;
+    if (!delimiterRowShape(delimiter)) return false;
+    const dsp = /^ */.exec(delimiter)[0].length;
+    return headerMatchesDelimiter(header.slice(hsp), delimiter.slice(dsp));
+  }
+  function tableHeaderEligible(headerRaw, delimiterRaw, snap) {
+    if (!isValidRawTable(headerRaw, delimiterRaw)) return false;
+    if (!snap.possibleList) return true;
+    const hf = listFamilyOf(headerRaw);
+    const headerCol0 = !/^[ \t]/.test(headerRaw);
+    const headerBlockShaped = /^ {0,3}(`{3,}|~{3,})/.test(headerRaw) || /^ {0,3}#{1,6}(?:[ \t]+|$)/.test(headerRaw) || /^ {0,3}>/.test(headerRaw) || /^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$/.test(headerRaw) || /^ {0,3}(=+|-+)[ \t]*$/.test(headerRaw);
+    const headerIsPlainCol0 = headerCol0 && hf === null && !headerBlockShaped;
+    const suppressed = !(snap.listBlankSeen && headerIsPlainCol0) && !(hf !== null && hf !== snap.possibleListFamily);
+    return !suppressed;
+  }
+  var BlockContext = class {
+    constructor(salt) {
+      this.lastBlock = "start";
+      this.paragraphOpen = false;
+      /** A list marker was seen and no provable container exit since. */
+      this.possibleList = false;
+      /** A blank line was seen inside the possible-list span. */
+      this.listBlankSeen = false;
+      /** Inside the body of a recognized GFM table. */
+      this.tableActive = false;
+      /**
+       * Marker family ('-', '+', '*', '.', ')') of the most recent list marker
+       * while a list is possible; null outside list context. List-continuation
+       * semantics for table headers depend on the FAMILY (a different-family
+       * marker interrupts the list; the same family continues it).
+       */
+      this.possibleListFamily = null;
+      /**
+       * List state captured before the PREVIOUS classified line — i.e. before
+       * the header line, when the line being classified is a delimiter row.
+       */
+      this.snapBeforePrevLine = null;
+      this.prevLine = null;
+      /**
+       * The RAW source line corresponding to [prevLine], or null when that line
+       * swallowed a multi-line construct (its raw shape is not a single source
+       * line) or was blank. Table COLUMN counting uses the raw line: GFM splits
+       * header/delimiter rows on unescaped pipes BEFORE inline parsing, so a
+       * pipe inside a code span still separates cells even though the span was
+       * tokenized (M1 issue: protected-only counting dropped columns).
+       */
+      this.prevRawLine = null;
+      this.codePlaceholderRe = new RegExp(`^ {4}MCODEPH${salt}[0-9]+MMM$`);
+      this.linkDefTokenRe = new RegExp(
+        `^\\[MLABELPH${salt}[0-9]+[aA]{32}MMM\\]:[ \\t]+MLITPH${salt}[0-9]+MLM(?:[ \\t]+"MLITPH${salt}[0-9]+MLM")?[ \\t]*$`
+      );
+    }
+    /** May an indented line starting here open an indented code block? */
+    allowIndented() {
+      if (this.paragraphOpen || this.possibleList) return false;
+      switch (this.lastBlock) {
+        case "start":
+        case "blank":
+        case "atx":
+        case "hr":
+        case "setext":
+        case "fenceClosed":
+        case "indentedCode":
+        case "table":
+        case "linkDef":
+          return true;
+        default:
+          return false;
+      }
+    }
+    /**
+     * A fenced block (top-level or single-level quote) was consumed whole by
+     * the scanner. `col0` tells whether a column-0 opener provably exited a
+     * possible list.
+     */
+    onFenceClosed(col0) {
+      this.lastBlock = "fenceClosed";
+      this.paragraphOpen = false;
+      this.tableActive = false;
+      if (col0) this.clearList();
+    }
+    /** Current list state, for the scanner's pre-header row-mode decision. */
+    snapshot() {
+      return {
+        possibleList: this.possibleList,
+        listBlankSeen: this.listBlankSeen,
+        possibleListFamily: this.possibleListFamily
+      };
+    }
+    clearList() {
+      this.possibleList = false;
+      this.listBlankSeen = false;
+      this.possibleListFamily = null;
+    }
+    /**
+     * Classify one emitted (protected) physical line. [rawSourceLine] is the
+     * corresponding raw source line (null when unavailable) — used for table
+     * column counting. Returns the resulting block kind; 'table' means this
+     * line was accepted as a table delimiter/body row.
+     */
+    classifyLine(rawProtectedLine, rawSourceLine = null) {
+      const line = rawProtectedLine.endsWith("\r") ? rawProtectedLine.slice(0, -1) : rawProtectedLine;
+      const snapBeforeThisLine = this.snapshot();
+      const snapBeforeHeader = this.snapBeforePrevLine ?? snapBeforeThisLine;
+      this.snapBeforePrevLine = snapBeforeThisLine;
+      if (line.trim() === "") {
+        this.lastBlock = "blank";
+        this.paragraphOpen = false;
+        this.tableActive = false;
+        if (this.possibleList) this.listBlankSeen = true;
+        this.prevLine = line;
+        this.prevRawLine = null;
+        return "blank";
+      }
+      if (this.codePlaceholderRe.test(line)) {
+        this.lastBlock = "indentedCode";
+        this.paragraphOpen = false;
+        this.tableActive = false;
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "indentedCode";
+      }
+      const sp = /^ */.exec(line)[0].length;
+      const indent = sp;
+      const t = line.slice(sp);
+      if (indent <= 3 && FENCE_RE.test(t)) {
+        this.lastBlock = "fenceClosed";
+        this.paragraphOpen = false;
+        this.tableActive = false;
+        if (indent === 0) this.clearList();
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "fenceClosed";
+      }
+      if (indent <= 3 && ATX_RE.test(t)) {
+        this.lastBlock = "atx";
+        this.paragraphOpen = false;
+        this.tableActive = false;
+        if (indent === 0) this.clearList();
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "atx";
+      }
+      if (indent <= 3 && SETEXT_EQ_RE.test(t)) {
+        if (this.paragraphOpen && !this.possibleList) {
+          this.lastBlock = "setext";
+          this.paragraphOpen = false;
+          this.tableActive = false;
+          this.prevLine = line;
+          this.prevRawLine = rawSourceLine;
+          return "setext";
+        }
+        this.textLine(line, rawSourceLine);
+        return "paragraph";
+      }
+      if (indent <= 3 && SETEXT_DASH_RE.test(t)) {
+        if (this.paragraphOpen && !this.possibleList) {
+          this.lastBlock = "setext";
+          this.paragraphOpen = false;
+          this.tableActive = false;
+          this.prevLine = line;
+          this.prevRawLine = rawSourceLine;
+          return "setext";
+        }
+        if (!this.paragraphOpen && HR_DASH_RE.test(t)) {
+          this.lastBlock = "hr";
+          this.tableActive = false;
+          if (indent === 0) this.clearList();
+          this.prevLine = line;
+          this.prevRawLine = rawSourceLine;
+          return "hr";
+        }
+      }
+      if (indent <= 3 && HR_RE.test(t)) {
+        this.lastBlock = "hr";
+        this.paragraphOpen = false;
+        this.tableActive = false;
+        if (indent === 0) this.clearList();
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "hr";
+      }
+      if (indent <= 3 && LIST_RE.test(t)) {
+        this.possibleList = true;
+        this.possibleListFamily = listFamilyOf(line);
+        this.paragraphOpen = true;
+        this.tableActive = false;
+        this.lastBlock = "other";
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "other";
+      }
+      if (indent <= 3 && t.startsWith(">")) {
+        if (/^>[ \t]{0,3}(`{3,}|~{3,})[ \t]*$/.test(t)) {
+          this.lastBlock = "fenceClosed";
+          this.paragraphOpen = false;
+          this.tableActive = false;
+          this.prevLine = line;
+          this.prevRawLine = rawSourceLine;
+          return "fenceClosed";
+        }
+        this.lastBlock = "other";
+        this.paragraphOpen = true;
+        this.tableActive = false;
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "other";
+      }
+      if (indent <= 3 && !this.paragraphOpen && !this.tableActive && this.linkDefTokenRe.test(t)) {
+        this.markLinkDef(line, rawSourceLine, indent);
+        return "linkDef";
+      }
+      if (indent <= 3 && this.prevLine !== null && this.prevRawLine !== null && rawSourceLine !== null && delimiterRowShape(rawSourceLine) && tableHeaderEligible(this.prevRawLine, rawSourceLine, snapBeforeHeader)) {
+        this.lastBlock = "table";
+        this.tableActive = true;
+        this.paragraphOpen = false;
+        this.clearList();
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "table";
+      }
+      if (this.tableActive) {
+        this.lastBlock = "table";
+        this.paragraphOpen = false;
+        this.prevLine = line;
+        this.prevRawLine = rawSourceLine;
+        return "table";
+      }
+      this.textLine(line, rawSourceLine);
+      return this.lastBlock;
+    }
+    markLinkDef(line, rawSourceLine, indent) {
+      this.lastBlock = "linkDef";
+      this.paragraphOpen = false;
+      this.tableActive = false;
+      if (indent === 0) this.clearList();
+      this.prevLine = line;
+      this.prevRawLine = rawSourceLine;
+    }
+    textLine(line, rawSourceLine) {
+      this.paragraphOpen = true;
+      this.lastBlock = "paragraph";
+      if (this.possibleList && this.listBlankSeen && !line.startsWith(" ") && !line.startsWith("	")) {
+        this.clearList();
+      }
+      this.prevLine = line;
+      this.prevRawLine = rawSourceLine;
+    }
+  };
+
   // tools/preview-src/src/delimiters.ts
   var MATH_TOKEN_SOURCE = "MMATHMDPH[A-Z0-9]{1,8}[0-9]+MMM";
   var CODE_TOKEN_SOURCE = "MCODEPH[A-Z0-9]{1,8}[0-9]+MMM";
   var SALT_RE = /^[A-Z0-9]{1,8}$/;
-  function protectMath(source, salt = "K7") {
+  var isSpanBoundaryLine = (line, quoted, prefix) => {
+    const l = line.endsWith("\r") ? line.slice(0, -1) : line;
+    if (l.trim() === "") return true;
+    if (quoted) {
+      if (l.startsWith(prefix)) {
+        const body = l.slice(prefix.length);
+        if (body.trim() === "") return true;
+        return isSpanBoundaryShape(body);
+      }
+      return /^ {0,3}>[ \t]*$/.test(l);
+    }
+    if (/^ {0,3}>/.test(l)) return true;
+    return isSpanBoundaryShape(l);
+  };
+  var isSpanBoundaryShape = (body) => {
+    if (/^ {0,3}(`{3,}|~{3,})/.test(body)) return true;
+    if (/^ {0,3}#{1,6}(?:[ \t]+|$)/.test(body)) return true;
+    if (/^ {0,3}(=+|-+)[ \t]*$/.test(body)) return true;
+    if (/^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$/.test(body)) return true;
+    if (/^ {0,3}(?:[-+*]|1[.)])(?:[ \t]+|$)/.test(body)) return true;
+    if (isTableDelimiter(body)) return true;
+    return false;
+  };
+  function protectMath(source, salt = "K7", opts = {}) {
     if (!SALT_RE.test(salt)) {
       throw new Error(`salt must match ${SALT_RE}, got "${salt}"`);
     }
     const math = [];
     const code = [];
+    const labels = [];
+    const lits = [];
+    const inline = opts.inlineOnly === true;
+    const linkIndex = opts.noLinkRefs || inline ? null : collectLinkDefs(source);
+    let occurrence = 0;
     let out = "";
     const n = source.length;
+    const ctx = new BlockContext(salt);
+    let outLineStart = 0;
+    let rawBuf = "";
+    let rawLineStart = 0;
+    let lineUncertain = false;
+    let prevOutLineText = null;
+    const cellCount = (l) => {
+      if (!hasUnescapedPipe(l)) return null;
+      let cells = splitUnescapedPipes(l);
+      if (cells.length > 1 && cells[0].trim() === "") cells = cells.slice(1);
+      if (cells.length > 1 && cells[cells.length - 1].trim() === "") cells = cells.slice(0, -1);
+      return cells.length;
+    };
+    const escapeFirstUnescapedPipe = (l) => {
+      for (let i2 = 0; i2 < l.length; i2++) {
+        if (l[i2] === "|" && backslashRunIn(l, i2) % 2 === 0) {
+          return `${l.slice(0, i2)}\\|${l.slice(i2 + 1)}`;
+        }
+      }
+      return l;
+    };
+    let rowPipeMode = false;
+    const stripCR = (l) => l.endsWith("\r") ? l.slice(0, -1) : l;
+    const hasUnescapedPipe = (l) => {
+      for (let i2 = 0; i2 < l.length; i2++) {
+        if (l[i2] === "|" && backslashRunIn(l, i2) % 2 === 0) return true;
+      }
+      return false;
+    };
+    const backslashRunIn = (s, j) => {
+      let k = 0;
+      while (j - 1 - k >= 0 && s[j - 1 - k] === "\\") k++;
+      return k;
+    };
+    const blockOpenerShape = (l) => /^ {0,3}(`{3,}|~{3,})/.test(l) || /^ {0,3}#{1,6}(?:[ \t]+|$)/.test(l) || /^ {0,3}(=+|-+)[ \t]*$/.test(l) || /^ {0,3}([-*_])([ \t]*\1){2,}[ \t]*$/.test(l) || /^ {0,3}([-+*]|\d{1,9}[.)])(?:[ \t]+|$)/.test(l) || /^ {0,3}>/.test(l);
+    const computeRowMode = (p) => {
+      const eol = endOfLine(p);
+      const line = stripCR(source.slice(p, eol));
+      if (line.trim() === "") return false;
+      if (hasUnescapedPipe(line) && eol < n) {
+        const neol = endOfLine(eol + 1);
+        const next = stripCR(source.slice(eol + 1, neol));
+        if (delimiterRowShape(next)) {
+          if (tableHeaderEligible(line, next, ctx.snapshot())) return true;
+        }
+      }
+      if (blockOpenerShape(line)) return false;
+      return ctx.tableActive;
+    };
+    const handleLine = (lineText, rawLine) => {
+      ctx.classifyLine(lineText, rawLine);
+      let replacement = null;
+      if (rawLine !== null && !ctx.tableActive && prevOutLineText !== null && delimiterRowShape(rawLine) && hasUnescapedPipe(prevOutLineText)) {
+        const protCells = cellCount(prevOutLineText);
+        const delimCells = cellCount(rawLine);
+        if (protCells !== null && delimCells !== null && protCells === delimCells) {
+          replacement = escapeFirstUnescapedPipe(lineText);
+        }
+      }
+      prevOutLineText = lineText;
+      return replacement;
+    };
+    const emit = (s, rawOverride) => {
+      if (inline) {
+        out += s;
+        return;
+      }
+      out += s;
+      if (rawOverride === void 0 || rawOverride !== null) {
+        rawBuf += rawOverride === void 0 ? s : rawOverride;
+      } else {
+        lineUncertain = true;
+      }
+      let rel = s.indexOf("\n");
+      while (rel !== -1) {
+        const nlPos = out.length - s.length + rel;
+        const outLine = out.slice(outLineStart, nlPos);
+        const rawSlice = lineUncertain ? null : rawBuf.slice(rawLineStart, rawBuf.length - s.length + rel);
+        const rawLine = rawSlice === null ? null : rawSlice.replace(/\r$/, "");
+        const replacement = handleLine(outLine, rawLine);
+        if (replacement !== null) {
+          out = out.slice(0, outLineStart) + replacement + out.slice(nlPos);
+        }
+        const suffix = s.length - rel - 1;
+        outLineStart = out.length - suffix;
+        rawLineStart = rawBuf.length - suffix;
+        lineUncertain = false;
+        rel = s.indexOf("\n", rel + 1);
+      }
+    };
     const mathToken = () => `MMATHMDPH${salt}${math.length}MMM`;
     const codeToken = () => `MCODEPH${salt}${code.length}MMM`;
     const lineStart = (p) => p === 0 || source[p - 1] === "\n";
@@ -26,6 +840,9 @@
     };
     const scanCloser = (start, closer) => {
       for (let j = start; j < n; j++) {
+        if (rowPipeMode && (source[j] === "\n" || source[j] === "|" && backslashRun(j) % 2 === 0)) {
+          return -1;
+        }
         if (!source.startsWith(closer, j)) continue;
         if (backslashRun(j) % 2 === 1) continue;
         return j;
@@ -34,14 +851,15 @@
     };
     const pushMath = (p, openLen, closeIdx, closeLen, display) => {
       const token = mathToken();
+      const raw = source.slice(p, closeIdx + closeLen);
       math.push({
         token,
         kind: "math",
         display,
         tex: source.slice(p + openLen, closeIdx),
-        raw: source.slice(p, closeIdx + closeLen)
+        raw
       });
-      out += token;
+      emit(token, raw.includes("\n") ? null : raw);
       return closeIdx + closeLen;
     };
     const tryMath = (p) => {
@@ -68,15 +886,18 @@
       return -1;
     };
     const skipOne = (p) => {
-      out += source[p];
+      emit(source[p]);
       return p + 1;
     };
     const tryFence = (p) => {
       if (!lineStart(p)) return -1;
       const eol = endOfLine(p);
       const line = source.slice(p, eol);
-      const m = /^ {0,3}(`{3,}|~{3,}).*$/.exec(line);
+      const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(
+        line.endsWith("\r") ? line.slice(0, -1) : line
+      );
       if (!m) return -1;
+      if (m[1][0] === "`" && m[2].includes("`")) return -1;
       const fch = m[1][0];
       const flen = m[1].length;
       const closeRe = new RegExp(`^ {0,3}[${fch === "`" ? "`" : "~"}]{${flen},}\\s*$`);
@@ -96,24 +917,155 @@
         q = qeol + 1;
       }
       const token = codeToken();
-      code.push({ token, kind: "code", construct: "fence", raw: source.slice(bodyStart, bodyEnd) });
-      out += line;
-      if (eol < n) out += "\n";
-      out += token;
-      if (closeIdx >= 0) out += "\n" + source.slice(closeIdx, closeEol);
+      const rawBody = source.slice(bodyStart, bodyEnd);
+      code.push({ token, kind: "code", construct: "fence", raw: rawBody, body: rawBody });
+      emit(line);
+      emit("\n");
+      emit(token, null);
+      if (closeIdx >= 0) emit("\n" + source.slice(closeIdx, closeEol));
+      ctx.onFenceClosed(/^ {0,3}/.exec(line)[0].length === 0);
       if (closeIdx === -1) return n;
       return closeEol;
+    };
+    const tryQuoteFence = (p) => {
+      if (!lineStart(p)) return -1;
+      const eol = endOfLine(p);
+      const line = source.slice(p, eol);
+      const m = /^( {0,3}> ?)[ \t]{0,3}(`{3,}|~{3,})(.*)$/.exec(
+        line.endsWith("\r") ? line.slice(0, -1) : line
+      );
+      if (!m) return -1;
+      if (m[2][0] === "`" && m[3].includes("`")) return -1;
+      const prefix = m[1];
+      const fch = m[2][0];
+      const flen = m[2].length;
+      const closeRe = new RegExp(`^[ \\t]{0,3}[${fch === "`" ? "`" : "~"}]{${flen},}[ \\t]*$`);
+      let q = eol < n ? eol + 1 : n;
+      const bodyLines = [];
+      let closeIdx = -1;
+      let closeEol = -1;
+      while (q < n) {
+        const qeol = endOfLine(q);
+        const l = source.slice(q, qeol);
+        if (l.startsWith(prefix)) {
+          const rest = l.slice(prefix.length);
+          if (closeRe.test(rest)) {
+            closeIdx = q;
+            closeEol = qeol;
+            break;
+          }
+          bodyLines.push(rest);
+          q = qeol + 1;
+          continue;
+        }
+        if (/^ {0,3}>/.test(l)) return -1;
+        break;
+      }
+      if (closeIdx === -1 && bodyLines.length === 0) return -1;
+      const token = codeToken();
+      const rawBody = bodyLines.join("\n");
+      code.push({ token, kind: "code", construct: "fence", raw: rawBody, body: rawBody });
+      emit(line);
+      emit("\n");
+      emit(prefix + token, null);
+      if (closeIdx >= 0) {
+        emit("\n" + source.slice(closeIdx, closeEol));
+        return closeEol;
+      }
+      emit("\n");
+      return q;
+    };
+    const tryLinkDef = (p) => {
+      if (linkIndex === null) return -1;
+      if (!lineStart(p)) return -1;
+      const ci = linkIndex.byStart.get(p);
+      if (ci === void 0) return -1;
+      if (ctx.paragraphOpen || ctx.tableActive) return -1;
+      const cand = linkIndex.candidates[ci];
+      if (cand.extentEnd <= p) return -1;
+      const base = linkIndex.byLabel.get(normalizeReference(cand.labelRaw));
+      if (base === void 0) return -1;
+      const lt = labelToken(salt, base, occurrence++);
+      labels.push({ token: lt, kind: "label", raw: cand.labelRaw });
+      const d0 = litToken(salt, lits.length);
+      lits.push({
+        token: d0,
+        kind: "literal",
+        raw: cand.destRaw,
+        role: "dest",
+        content: cand.destContent
+      });
+      let emitted = `[${lt}]: ${d0}`;
+      if (cand.titleRaw !== null) {
+        const t0 = litToken(salt, lits.length);
+        lits.push({
+          token: t0,
+          kind: "literal",
+          raw: cand.titleRaw,
+          role: "title",
+          content: cand.titleContent ?? ""
+        });
+        emitted += ` "${t0}"`;
+      }
+      emit(emitted, null);
+      return cand.extentEnd;
+    };
+    const tryReference = (p) => {
+      if (linkIndex === null) return -1;
+      if (source[p] !== "[") return -1;
+      if (backslashRun(p) % 2 === 1) return -1;
+      let j = p + 1;
+      while (j < n) {
+        const c = source[j];
+        if (c === "\\" && j + 1 < n) {
+          j += 2;
+          continue;
+        }
+        if (c === "[") return -1;
+        if (c === "]") break;
+        if (c === "\n") {
+          if (rowPipeMode) return -1;
+          const eol = endOfLine(j + 1);
+          if (stripCR(source.slice(j + 1, eol)).trim() === "") return -1;
+          j++;
+          continue;
+        }
+        if (rowPipeMode && c === "|" && backslashRun(j) % 2 === 0) return -1;
+        j++;
+      }
+      if (j >= n) return -1;
+      const labelRaw = source.slice(p + 1, j);
+      if (labelRaw.length < 1 || labelRaw.length > 1e3) return -1;
+      if (labelRaw.trim() === "") return -1;
+      const after = j + 1;
+      const next = source[after];
+      if (next === "(") return -1;
+      if (next === "[") {
+        let k = after + 1;
+        if (k < n && source[k] === "]") {
+          const base2 = linkIndex.byLabel.get(normalizeReference(labelRaw));
+          if (base2 === void 0) return -1;
+          const lt2 = labelToken(salt, base2, occurrence++);
+          labels.push({ token: lt2, kind: "label", raw: labelRaw });
+          emit(`[${lt2}][]`);
+          return k + 1;
+        }
+        return -1;
+      }
+      const base = linkIndex.byLabel.get(normalizeReference(labelRaw));
+      if (base === void 0) return -1;
+      const lt = labelToken(salt, base, occurrence++);
+      labels.push({ token: lt, kind: "label", raw: labelRaw });
+      emit(`[${lt}]`);
+      return after;
     };
     const tryIndented = (p) => {
       if (!lineStart(p)) return -1;
       const eol = endOfLine(p);
       const line = source.slice(p, eol);
       if (!/^( {4}|\t)/.test(line)) return -1;
-      const trimmed = out.endsWith("\n") ? out.slice(0, -1) : out;
-      const lastLine = trimmed.slice(trimmed.lastIndexOf("\n") + 1);
-      const blankBefore = out === "" || lastLine.trim() === "";
-      const afterCode = lastLine.startsWith("MCODEPH");
-      if (!blankBefore && !afterCode) return -1;
+      if (line.trim() === "") return -1;
+      if (!ctx.allowIndented()) return -1;
       const lines = [];
       let q = p;
       let endedAtEof = false;
@@ -145,8 +1097,18 @@
         break;
       }
       const token = codeToken();
-      code.push({ token, kind: "code", construct: "indented", raw: lines.join("\n") });
-      out += "    " + token + (endedAtEof ? "" : "\n");
+      const rawBody = lines.join("\n");
+      code.push({
+        token,
+        kind: "code",
+        construct: "indented",
+        raw: rawBody,
+        // Restore content: the scanner strips the 4-space/tab markers exactly
+        // like the old restore pass did (kept here so restore is data-driven).
+        body: rawBody.replace(/^ {4}/gm, "").replace(/^\t/gm, "")
+      });
+      emit("    " + token, null);
+      if (!endedAtEof) emit("\n");
       return q;
     };
     const tryCodeSpan = (p) => {
@@ -154,35 +1116,84 @@
       if (backslashRun(p) % 2 === 1) return -1;
       let k = 1;
       while (p + k < n && source[p + k] === "`") k++;
+      let ls = p;
+      while (ls > 0 && source[ls - 1] !== "\n") ls--;
+      const openerLineText = source.slice(ls, endOfLine(ls));
+      const qm = /^( {0,3}> ?)/.exec(openerLineText);
+      const quoted = qm !== null && openerLineText[qm[1].length] !== ">";
+      const qprefix = qm ? qm[1] : "";
+      let guardPos = source.indexOf("\n", p + k);
+      guardPos = guardPos === -1 ? n : guardPos + 1;
+      const boundaryBefore = (to) => {
+        while (guardPos <= to) {
+          const eolIdx = endOfLine(guardPos);
+          if (isSpanBoundaryLine(source.slice(guardPos, eolIdx), quoted, qprefix)) return true;
+          if (eolIdx >= n) break;
+          guardPos = eolIdx + 1;
+        }
+        return false;
+      };
       let q = p + k;
       for (; ; ) {
         const idx = source.indexOf("`", q);
-        if (idx === -1) return -1;
+        if (idx === -1) break;
         let k2 = 1;
         while (idx + k2 < n && source[idx + k2] === "`") k2++;
-        if (/\r?\n[ \t\r]*\r?\n/.test(source.slice(p, idx))) return -1;
+        if (boundaryBefore(idx)) break;
+        if (rowPipeMode) {
+          let cellBoundary = false;
+          for (let j = p + k; j < idx && !cellBoundary; j++) {
+            cellBoundary = source[j] === "\n" || source[j] === "|" && backslashRun(j) % 2 === 0;
+          }
+          if (cellBoundary) break;
+        }
         if (k2 === k) {
           const token = codeToken();
-          code.push({ token, kind: "code", construct: "span", raw: source.slice(p, idx + k2) });
-          out += token;
+          const raw = source.slice(p, idx + k2);
+          code.push({
+            token,
+            kind: "code",
+            construct: "span",
+            raw,
+            body: source.slice(p + k, idx)
+          });
+          emit(token, raw.includes("\n") ? null : raw);
           return idx + k2;
         }
         q = idx + k2;
       }
+      emit(source.slice(p, p + k));
+      return p + k;
     };
     let i = 0;
     while (i < n) {
-      let ni = tryFence(i);
+      if (lineStart(i)) rowPipeMode = inline ? false : computeRowMode(i);
+      let ni = inline ? -1 : tryFence(i);
       if (ni >= 0) {
         i = ni;
         continue;
       }
-      ni = tryIndented(i);
+      ni = inline ? -1 : tryQuoteFence(i);
+      if (ni >= 0) {
+        i = ni;
+        continue;
+      }
+      ni = inline ? -1 : tryLinkDef(i);
+      if (ni >= 0) {
+        i = ni;
+        continue;
+      }
+      ni = inline ? -1 : tryIndented(i);
       if (ni >= 0) {
         i = ni;
         continue;
       }
       ni = tryCodeSpan(i);
+      if (ni >= 0) {
+        i = ni;
+        continue;
+      }
+      ni = inline ? -1 : tryReference(i);
       if (ni >= 0) {
         i = ni;
         continue;
@@ -193,18 +1204,28 @@
         continue;
       }
       if (source[i] === "\\" && (source[i + 1] === "$" || source[i + 1] === "\\" || source[i + 1] === "`")) {
-        out += source.substring(i, i + 2);
+        emit(source.substring(i, i + 2));
         i += 2;
         continue;
       }
-      out += source[i];
+      emit(source[i]);
       i++;
     }
-    return { text: out, math, code };
+    if (!inline && outLineStart < out.length) {
+      const outLine = out.slice(outLineStart);
+      const rawSlice = lineUncertain ? null : rawBuf.slice(rawLineStart);
+      const rawLine = rawSlice === null ? null : rawSlice.replace(/\r$/, "");
+      const replacement = handleLine(outLine, rawLine);
+      if (replacement !== null) {
+        out = out.slice(0, outLineStart) + replacement;
+      }
+    }
+    return { text: out, math, code, labels, lits };
   }
 
   // tools/preview-src/src/tsvtables.ts
   var DEFAULTS = { minRows: 3, minCols: 2 };
+  var looksContainerLine = (line) => /^[\t >]/.test(line) || /^(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/.test(line);
   function clamp(value, fallback) {
     if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
     return Math.max(2, Math.floor(value));
@@ -225,9 +1246,11 @@
       const paras = [];
       let cols = minCols;
       let end = i;
+      let containsContainerLine = looksContainerLine(lines[i]);
       for (; ; ) {
         const rows = [];
         while (end < lines.length && isTsvLine(lines[end])) {
+          if (looksContainerLine(lines[end])) containsContainerLine = true;
           const cells = lines[end].split("	");
           if (cells.length > cols) cols = cells.length;
           rows.push(cells);
@@ -244,6 +1267,11 @@
       }
       const totalRows = paras.reduce((s, p) => s + p.rows.length, 0);
       if (totalRows < minRows) {
+        for (let k = i; k < end; k++) out.push(lines[k]);
+        i = end;
+        continue;
+      }
+      if (containsContainerLine) {
         for (let k = i; k < end; k++) out.push(lines[k]);
         i = end;
         continue;
@@ -493,44 +1521,259 @@
     md.use(markdownItCjkFriendlyPlugin);
     let html = md.render(mdSource);
     const insideTag = (offset) => html.lastIndexOf("<", offset) > html.lastIndexOf(">", offset);
-    html = html.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok, offset) => {
-      const seg = prot.code.find((s) => s.token === tok);
-      if (!seg) return tok;
-      if (insideTag(offset)) return esc(seg.raw);
-      if (seg.construct === "span") {
-        const m = /^(`+)([\s\S]*?)\1/.exec(seg.raw);
-        let body = (m ? m[2] : seg.raw).replace(/\r\n?|\n/g, " ");
-        if (body.startsWith(" ") && body.endsWith(" ") && /[^ ]/.test(body)) {
-          body = body.slice(1, -1);
+    const codeByToken = new Map(prot.code.map((s) => [s.token, s]));
+    const mathByToken = new Map(prot.math.map((s) => [s.token, s]));
+    const labelByToken = new Map(prot.labels.map((s) => [s.token, s]));
+    const litByToken = new Map(prot.lits.map((s) => [s.token, s]));
+    const fragMd = v.markdownit({ html: false, linkify: true });
+    fragMd.use(markdownItCjkFriendlyPlugin);
+    const SALT_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    const saltCandidate = (idx, len) => {
+      let c = "";
+      for (let pos = len - 1; pos >= 0; pos--) {
+        c = SALT_ALPHABET[idx % 36] + c;
+        idx = Math.floor(idx / 36);
+      }
+      return c;
+    };
+    const pickFragSalt = (raw) => {
+      const collides = (cand) => raw.includes("MMATHMDPH" + cand) || raw.includes("MCODEPH" + cand) || raw.includes("MLABELPH" + cand) || raw.includes("MLITPH" + cand);
+      for (let len = 2; len <= 8; len++) {
+        const count = Math.pow(36, len);
+        for (let idx = 0; idx < count; idx++) {
+          const cand = saltCandidate(idx, len);
+          if (cand === salt) continue;
+          if (collides(cand)) continue;
+          return cand;
         }
-        return `<code>${esc(body)}</code>`;
       }
-      if (seg.construct === "fence") return esc(seg.raw);
-      return esc(seg.raw.replace(/^ {4}/gm, "").replace(/^\t/gm, ""));
-    });
-    html = html.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok, offset) => {
-      const seg = prot.math.find((s) => s.token === tok);
-      if (!seg) return tok;
-      if (insideTag(offset)) return esc(seg.raw);
-      try {
-        return v.katex.renderToString(seg.tex, {
-          displayMode: seg.display,
-          throwOnError: opts.throwOnError ?? false,
-          strict: false,
-          trust: false
-        });
-      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        errors.push({ tex: seg.tex, message });
-        return `<span class="math-error">${esc(seg.tex)}</span>`;
+      throw new Error("MathMD: no collision-free inner salt exists");
+    };
+    const renderLabelFragment = (raw) => {
+      const fragSalt = pickFragSalt(raw);
+      const fp = protectMath(raw, fragSalt, { inlineOnly: true });
+      const fCode = new Map(fp.code.map((s) => [s.token, s]));
+      const fMath = new Map(fp.math.map((s) => [s.token, s]));
+      let fh = fragMd.renderInline(fp.text);
+      const fInsideTag = (offset) => fh.lastIndexOf("<", offset) > fh.lastIndexOf(">", offset);
+      fh = fh.replace(new RegExp(CODE_TOKEN_SOURCE, "g"), (tok, offset) => {
+        const seg = fCode.get(tok);
+        if (!seg) return tok;
+        if (fInsideTag(offset)) return esc(seg.raw);
+        if (seg.construct === "span") {
+          let body = seg.body.replace(/\r\n?|\n/g, " ");
+          if (body.startsWith(" ") && body.endsWith(" ") && /[^ ]/.test(body)) {
+            body = body.slice(1, -1);
+          }
+          return `<code>${esc(body)}</code>`;
+        }
+        return esc(seg.body);
+      });
+      let fragMathCount = 0;
+      fh = fh.replace(new RegExp(MATH_TOKEN_SOURCE, "g"), (tok, offset) => {
+        const seg = fMath.get(tok);
+        if (!seg) return tok;
+        if (fInsideTag(offset)) return esc(seg.raw);
+        fragMathCount++;
+        try {
+          return v.katex.renderToString(seg.tex, {
+            displayMode: seg.display,
+            throwOnError: opts.throwOnError ?? false,
+            strict: false,
+            trust: false
+          });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          errors.push({ tex: seg.tex, message });
+          return `<span class="math-error">${esc(seg.tex)}</span>`;
+        }
+      });
+      return { html: fh, mathCount: fragMathCount };
+    };
+    const restoreAttributeContent = (role, content) => {
+      const innerSalt = pickFragSalt(content);
+      const ip = protectMath(content, innerSalt, { inlineOnly: true });
+      const innerByToken = /* @__PURE__ */ new Map();
+      for (const seg of ip.math) innerByToken.set(seg.token, seg.raw);
+      for (const seg of ip.code) innerByToken.set(seg.token, seg.raw);
+      const restoreTokens = (text) => text.replace(
+        new RegExp(`${MATH_TOKEN_SOURCE}|${CODE_TOKEN_SOURCE}`, "g"),
+        (tok) => {
+          const raw = innerByToken.get(tok);
+          return raw !== void 0 ? raw : tok;
+        }
+      );
+      const lineNormalized = ip.text.replace(/\r\n?/g, "\n");
+      const unescaped = unescapeContent(lineNormalized);
+      return restoreTokens(role === "title" ? unescaped : md.normalizeLink(unescaped));
+    };
+    let visibleMath = 0;
+    const ANY_TOKEN_RE = new RegExp(
+      `${MATH_TOKEN_SOURCE}|${CODE_TOKEN_SOURCE}|${LABEL_TOKEN_SOURCE}|${LIT_TOKEN_SOURCE}`,
+      "g"
+    );
+    html = html.replace(ANY_TOKEN_RE, (tok, offset) => {
+      const codeSeg = codeByToken.get(tok);
+      if (codeSeg !== void 0) {
+        if (insideTag(offset)) return esc(codeSeg.raw);
+        if (codeSeg.construct === "span") {
+          let body = codeSeg.body.replace(/\r\n?|\n/g, " ");
+          if (body.startsWith(" ") && body.endsWith(" ") && /[^ ]/.test(body)) {
+            body = body.slice(1, -1);
+          }
+          return `<code>${esc(body)}</code>`;
+        }
+        if (codeSeg.construct === "fence") return esc(codeSeg.raw);
+        return esc(codeSeg.body);
       }
+      const litSeg = litByToken.get(tok);
+      if (litSeg !== void 0) {
+        return esc(restoreAttributeContent(litSeg.role, litSeg.content));
+      }
+      const labelSeg = labelByToken.get(tok);
+      if (labelSeg !== void 0) {
+        if (insideTag(offset)) return esc(labelSeg.raw);
+        const frag = renderLabelFragment(labelSeg.raw);
+        visibleMath += frag.mathCount;
+        return frag.html;
+      }
+      const mathSeg = mathByToken.get(tok);
+      if (mathSeg !== void 0) {
+        if (insideTag(offset)) return esc(mathSeg.raw);
+        visibleMath++;
+        try {
+          return v.katex.renderToString(mathSeg.tex, {
+            displayMode: mathSeg.display,
+            throwOnError: opts.throwOnError ?? false,
+            strict: false,
+            trust: false
+          });
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          errors.push({ tex: mathSeg.tex, message });
+          return `<span class="math-error">${esc(mathSeg.tex)}</span>`;
+        }
+      }
+      return tok;
     });
-    return { html, mathCount: prot.math.length, errors };
+    return { html, mathCount: visibleMath, errors };
   }
   globalThis.MathMD = {
     renderMarkdown,
-    protectMath
+    protectMath,
+    normalizeReference
   };
+
+  // tools/preview-src/src/casefold.ts
+  var foldOperations = 0;
+  function foldOperationCount() {
+    return foldOperations;
+  }
+  function foldCaseWithMap(s) {
+    foldOperations++;
+    const folded = s.toLowerCase();
+    if (folded === s) {
+      const n = s.length;
+      const ownerStart = new Array(n);
+      const ownerEnd = new Array(n);
+      for (let i = 0; i < n; i++) {
+        ownerStart[i] = i;
+        ownerEnd[i] = i + 1;
+      }
+      return { folded, ownerStart, ownerEnd };
+    }
+    const pieces = [];
+    const pieceStart = [];
+    const pieceEnd = [];
+    for (let i = 0; i < s.length; ) {
+      const cp = s.codePointAt(i);
+      const size = cp > 65535 ? 2 : 1;
+      pieces.push(String.fromCodePoint(cp).toLowerCase());
+      pieceStart.push(i);
+      pieceEnd.push(i + size);
+      i += size;
+    }
+    const aligned = alignOwnerMap(pieces, pieceStart, pieceEnd, folded);
+    if (aligned === null) return null;
+    return { folded, ownerStart: aligned.ownerStart, ownerEnd: aligned.ownerEnd };
+  }
+  function alignOwnerMap(pieces, pieceStart, pieceEnd, folded) {
+    const expWidths = [];
+    const ownerOfCp = [];
+    pieces.forEach((p, k) => {
+      for (let u = 0; u < p.length; ) {
+        const cp = p.codePointAt(u);
+        const w = cp > 65535 ? 2 : 1;
+        expWidths.push(w);
+        ownerOfCp.push(k);
+        u += w;
+      }
+    });
+    const ownerStart = [];
+    const ownerEnd = [];
+    let bi = 0;
+    for (let j = 0; j < expWidths.length; j++) {
+      if (bi >= folded.length) return null;
+      const fb = folded.codePointAt(bi);
+      const fbSize = fb > 65535 ? 2 : 1;
+      if (fbSize !== expWidths[j]) return null;
+      const k = ownerOfCp[j];
+      for (let u = 0; u < fbSize; u++) {
+        ownerStart.push(pieceStart[k]);
+        ownerEnd.push(pieceEnd[k]);
+      }
+      bi += fbSize;
+    }
+    if (bi !== folded.length) return null;
+    return { ownerStart, ownerEnd };
+  }
+  function hasUnpairedSurrogate(s) {
+    for (let i = 0; i < s.length; i++) {
+      const cu = s.charCodeAt(i);
+      if (cu >= 55296 && cu <= 56319) {
+        const nx = i + 1 < s.length ? s.charCodeAt(i + 1) : -1;
+        if (!(nx >= 56320 && nx <= 57343)) return true;
+        i++;
+      } else if (cu >= 56320 && cu <= 57343) {
+        return true;
+      }
+    }
+    return false;
+  }
+  var isHighHalf = (c) => c >= "\uD800" && c <= "\uDBFF";
+  var isLowHalf = (c) => c >= "\uDC00" && c <= "\uDFFF";
+  function matchRangesInFolded(f, originalText, foldedQuery) {
+    if (foldedQuery.length === 0) return [];
+    if (hasUnpairedSurrogate(foldedQuery)) return [];
+    const out = [];
+    let from = 0;
+    for (; ; ) {
+      const first = f.folded.indexOf(foldedQuery, from);
+      if (first === -1) break;
+      const last = first + foldedQuery.length - 1;
+      if (last >= f.ownerStart.length) break;
+      const origStart = f.ownerStart[first];
+      const origEnd = f.ownerEnd[last];
+      if (origStart < 0 || origEnd > originalText.length || origStart >= origEnd) {
+        break;
+      }
+      const startMidPair = origStart > 0 && isLowHalf(originalText[origStart]) && isHighHalf(originalText[origStart - 1]);
+      const endMidPair = origEnd < originalText.length && isHighHalf(originalText[origEnd - 1]) && isLowHalf(originalText[origEnd]);
+      if (startMidPair || endMidPair) {
+        from = first + foldedQuery.length;
+        continue;
+      }
+      out.push([origStart, origEnd]);
+      from = first + foldedQuery.length;
+    }
+    return out;
+  }
+  function foldedMatchRanges(text, query) {
+    if (query.length === 0) return [];
+    const t = foldCaseWithMap(text);
+    if (t === null) return [];
+    return matchRangesInFolded(t, text, query.toLowerCase());
+  }
 
   // tools/preview-src/src/host.ts
   function escapeHtml(s) {
@@ -602,14 +1845,14 @@
     paintedRanges = null;
   }
   var findNodes = null;
-  var findData = [];
+  var findFolded = [];
   var findNodesRoot = null;
   var findQuery = null;
   var findRanges = [];
   var paintedRanges = null;
   function invalidateFindIndex() {
     findNodes = null;
-    findData = [];
+    findFolded = [];
     findNodesRoot = null;
     findQuery = null;
     findRanges = [];
@@ -655,7 +1898,13 @@
     }
     if (findNodesRoot !== target || findNodes === null) {
       findNodes = textNodesUnder(target);
-      findData = findNodes.map((n) => (n.nodeValue ?? "").toLowerCase());
+      findFolded = findNodes.map((n) => {
+        const f = foldCaseWithMap(n.nodeValue ?? "");
+        if (f === null) {
+          console.warn("MathMD find: text node could not be case-folded safely; skipped");
+        }
+        return f;
+      });
       findNodesRoot = target;
       findQuery = null;
       findRanges = [];
@@ -665,14 +1914,13 @@
     if (findQuery !== q) {
       const ranges2 = [];
       for (let k = 0; k < nodes.length; k++) {
-        const data = findData[k];
-        let i = data.indexOf(q);
-        while (i !== -1) {
+        const folded = findFolded[k];
+        if (folded === null) continue;
+        for (const [origStart, origEnd] of matchRangesInFolded(folded, nodes[k].nodeValue ?? "", q)) {
           const r = document.createRange();
-          r.setStart(nodes[k], i);
-          r.setEnd(nodes[k], i + q.length);
+          r.setStart(nodes[k], origStart);
+          r.setEnd(nodes[k], origEnd);
           ranges2.push(r);
-          i = data.indexOf(q, i + q.length);
         }
       }
       findQuery = q;
@@ -715,7 +1963,16 @@ ${escapeHtml(message)}</pre>`;
     }
   }
   var bridge = globalThis;
-  bridge.MathMD = { ...bridge.MathMD ?? {}, hostUpdate, find };
+  bridge.MathMD = {
+    ...bridge.MathMD ?? {},
+    hostUpdate,
+    find,
+    foldCaseWithMap,
+    foldedMatchRanges,
+    matchRangesInFolded,
+    alignOwnerMap,
+    foldOperationCount
+  };
   document.addEventListener("DOMContentLoaded", () => {
     const target = document.getElementById("preview");
     if (target && target.childElementCount === 0) {

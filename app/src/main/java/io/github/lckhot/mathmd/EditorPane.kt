@@ -31,19 +31,13 @@ private fun editorFontFamily(name: String): FontFamily = when (name) {
     else -> FontFamily(Typeface.create(name, Typeface.NORMAL))
 }
 
-/** Case-insensitive all-match ranges of [query] in [text]. */
-internal fun matchRanges(text: String, query: String): List<IntRange> {
-    if (query.isEmpty()) return emptyList()
-    val t = text.lowercase()
-    val q = query.lowercase()
-    return buildList {
-        var i = t.indexOf(q)
-        while (i != -1) {
-            add(i until i + q.length)
-            i = t.indexOf(q, i + q.length)
-        }
-    }
-}
+/**
+ * Case-insensitive all-match ranges of [query] in [text] (M3: folds via
+ * [CaseFold] so length-changing mappings — İ, Deseret — highlight the full
+ * original code points instead of mis-clamping offsets).
+ */
+internal fun matchRanges(text: String, query: String): List<IntRange> =
+    CaseFold.matchRanges(text, query)
 
 @Composable
 internal fun EditorPane(
