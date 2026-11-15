@@ -16,8 +16,8 @@ android {
         applicationId = "io.github.lckhot.mathmd"
         minSdk = 29
         targetSdk = 36
-        versionCode = 20
-        versionName = "1.3.1"
+        versionCode = 21
+        versionName = "1.3.2"
     }
 
     // CI signing (GitHub Actions): secrets provide base64 keystore + passwords.

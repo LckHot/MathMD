@@ -1,20 +1,21 @@
-What's new since v1.3.0
+What's new since v1.3.1
 
-- **Safer math and Markdown rendering**: code spans, fenced/indented
-  code, GFM tables, link reference definitions, and all four math
-  delimiters are protected before Markdown parsing. Link labels,
-  destinations, titles, Unicode case-insensitive search, CRLF documents,
-  and inline/reference attributes now restore without lost content,
-  broken links, token collisions, or math injected into real code.
-- **More reliable document flows**: Open/New/Save As and asynchronous IO
-  callbacks are bound to the current document and request. Picker state
-  survives recreation, stale callbacks cannot overwrite newer edits,
-  created documents request persistable read/write grants, and an
-  interrupted Create reports an unknown result instead of rebinding to
-  an unverified target.
-- **Document decoding and test coverage**: UTF-8/UTF-16 BOM handling is
-  explicit, and the preview suite now runs 604 checks against both fresh
-  and committed bundles, plus Android unit and build checks.
+- **Clearer unsaved-changes dialog**: a single primary Save action,
+  distinct destructive Discard styling, and neutral new-window/Cancel
+  actions make dirty Open/New decisions easier to scan. Long filenames
+  and large font scales remain accessible.
+- **Organized Settings**: Appearance, Editor, Preview, and Tables are
+  now lightweight sections. TSV conversion uses a Switch, numeric fields
+  retain exact input with range hints, value pickers are full width, and
+  a Done action provides an explicit exit.
+- **Compact responsive search**: a filled query pill with inline Clear,
+  stable result counts, icon navigation, and full-size touch targets.
+  Narrow screens and large fonts wrap to two rows instead of clipping.
+  IME Search/Enter advances to the next match; Escape closes search.
+
+Math rendering, document IO, and Edit/Preview viewport behavior are
+unchanged in this release. The preview suite remains at 604 checks per
+fresh and committed bundle, with Android unit and build validation.
 
 **Downloads**
 
