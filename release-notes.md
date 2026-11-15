@@ -1,21 +1,20 @@
-What's new since v1.2.0
+What's new since v1.3.0
 
-- **ChatGPT-style TSV tables render as real tables**: plain
-  tab-separated blocks (as emitted by ChatGPT's web client, no pipe
-  syntax, blank lines allowed between rows) are converted to tables in
-  the preview. Conversion runs after math protection, so tabs can never
-  cut a formula, and fenced/indented code is left alone. Tables wider
-  than the page scroll inside their own container as before.
-- **Settings: TSV table controls**: an On/Off toggle for the conversion,
-  plus "TSV minimum rows" (default 3) and "TSV minimum columns"
-  (default 2) knobs that set how large a tab-separated run must be to
-  convert. Changing the toggle re-renders the preview live.
-- **New document**: the menu gains New (first item). Unsaved edits are
-  handled identically by Open and New — the unsaved-changes guard asks
-  first (Save / Discard / Keep this and start a new window / Cancel),
-  then creates the blank document.
-- Internal: third round of code-quality review fixes (document IO,
-  manifest queries, CI comment accuracy); mdtest suite now 64/64.
+- **Safer math and Markdown rendering**: code spans, fenced/indented
+  code, GFM tables, link reference definitions, and all four math
+  delimiters are protected before Markdown parsing. Link labels,
+  destinations, titles, Unicode case-insensitive search, CRLF documents,
+  and inline/reference attributes now restore without lost content,
+  broken links, token collisions, or math injected into real code.
+- **More reliable document flows**: Open/New/Save As and asynchronous IO
+  callbacks are bound to the current document and request. Picker state
+  survives recreation, stale callbacks cannot overwrite newer edits,
+  created documents request persistable read/write grants, and an
+  interrupted Create reports an unknown result instead of rebinding to
+  an unverified target.
+- **Document decoding and test coverage**: UTF-8/UTF-16 BOM handling is
+  explicit, and the preview suite now runs 604 checks against both fresh
+  and committed bundles, plus Android unit and build checks.
 
 **Downloads**
 
